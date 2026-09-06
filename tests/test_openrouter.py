@@ -103,6 +103,37 @@ def test_success_is_typed_unattested_and_has_document_provenance():
     }
 
 
+@pytest.mark.parametrize(
+    ("formatted", "expected"),
+    [
+        ("$5,000.25", "5000.25"),
+        ("5,000 USD", "5000"),
+        ("(125.50)", "-125.50"),
+        ("$5,000/month", "5000"),
+        ("USD 60,000 annually", "5000"),
+        ({"amount": "$60,000", "currency": "USD", "period": "annual"}, "5000"),
+    ],
+)
+def test_unambiguous_currency_formatting_is_normalized(formatted, expected):
+    body = _body(values=[{
+        "path": "income.monthly_gross_income", "value": formatted, "ref": "Box one divided monthly"
+    }])
+    result = _parser(lambda request: httpx.Response(200, json=body)).parse_bytes(
+        b"pdf", "w2.pdf", "application/pdf"
+    )
+    assert str(result.values["income.monthly_gross_income"]["value"]) == expected
+
+
+def test_ambiguous_currency_text_remains_invalid():
+    body = _body(values=[{
+        "path": "income.monthly_gross_income", "value": "about $5,000", "ref": "Box one"
+    }])
+    with pytest.raises(DocumentInferenceError, match="Invalid value"):
+        _parser(lambda request: httpx.Response(200, json=body)).parse_bytes(
+            b"pdf", "w2.pdf", "application/pdf"
+        )
+
+
 def test_proposal_cannot_reach_engine_without_confirmation():
     parser = _parser(lambda request: httpx.Response(200, json=_body()))
     proposal = parser.parse_bytes(b"image", "w2.png", "image/png").values[

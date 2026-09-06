@@ -13,6 +13,7 @@ import mimetypes
 import os
 import re
 import types
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Literal, Union, get_args, get_origin
 
@@ -440,8 +441,9 @@ class OpenRouterDocumentParser:
                 raise DocumentInferenceError("A 1099 extraction cannot propose expense values")
             if item.path in proposals:
                 raise DocumentInferenceError(f"Model returned duplicate fact path: {item.path}")
+            normalized_value = self._normalize_scalar(item.path, item.value)
             wrapped = {
-                "value": item.value,
+                "value": normalized_value,
                 "provenance": {"source": source, "ref": item.ref, "attested": False},
             }
             try:
@@ -455,3 +457,59 @@ class OpenRouterDocumentParser:
                 "attested": False,
             }
         return ProposedFacts(document_type=extraction.document_type, values=proposals)
+
+    @staticmethod
+    def _normalize_scalar(path: str, value: Any) -> Any:
+        """Normalize unambiguous currency formatting for Decimal leaves only."""
+        annotation = CANONICAL_LEAVES[path].model_fields["value"].annotation
+        if annotation is not Decimal:
+            return value
+        period = None
+        if isinstance(value, dict):
+            if not set(value).issubset({"amount", "value", "currency", "period", "unit"}):
+                return value
+            amount_keys = [key for key in ("amount", "value") if key in value]
+            currency = str(value.get("currency") or "USD").upper()
+            if len(amount_keys) != 1 or currency not in {"USD", "$"}:
+                return value
+            period = str(value.get("period") or value.get("unit") or "").lower().strip() or None
+            value = value[amount_keys[0]]
+        if not isinstance(value, (str, int, float, Decimal)) or isinstance(value, bool):
+            return value
+        candidate = value.strip() if isinstance(value, str) else str(value)
+        lowered = candidate.lower()
+        suffixes = {
+            "/month": "monthly", " per month": "monthly", " monthly": "monthly",
+            "/mo": "monthly", " per mo": "monthly", " annually": "annual",
+            " annual": "annual", " per year": "annual", "/year": "annual",
+        }
+        for suffix, detected_period in suffixes.items():
+            if lowered.endswith(suffix):
+                candidate = candidate[:-len(suffix)].strip()
+                period = period or detected_period
+                break
+        negative = candidate.startswith("(") and candidate.endswith(")")
+        if negative:
+            candidate = candidate[1:-1].strip()
+        if candidate.upper().startswith("USD "):
+            candidate = candidate[4:].strip()
+        if candidate.upper().endswith(" USD"):
+            candidate = candidate[:-4].strip()
+        if candidate.startswith("$"):
+            candidate = candidate[1:].strip()
+        candidate = candidate.replace(",", "")
+        try:
+            number = Decimal(candidate)
+        except InvalidOperation:
+            return value
+        number = -number if negative else number
+        monthly_path = path == "income.monthly_gross_income" or path.startswith("expenses.")
+        if period in {"month", "monthly", "per_month", "mo"} and not monthly_path:
+            return value
+        if period in {"year", "annual", "annually", "yearly", "per_year"}:
+            if path != "income.monthly_gross_income":
+                return value
+            number /= Decimal(12)
+        elif period not in {None, "month", "monthly", "per_month", "mo"}:
+            return value
+        return number
