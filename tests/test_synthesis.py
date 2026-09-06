@@ -67,6 +67,24 @@ def test_synthesis_is_constrained_to_engine_outcomes():
     assert seen["temperature"] == 0
 
 
+def test_synthesis_retries_parameter_routing_failure_without_relaxing_schema():
+    facts, eligibility = _case_and_result()
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        if len(requests) == 1:
+            return httpx.Response(404, json={
+                "error": {"message": "No endpoints found that can handle the requested parameters"}
+            })
+        return httpx.Response(200, json=_body(eligibility.primary.outcome))
+
+    result = _synth(handler).synthesize(facts, eligibility)
+    assert result.primary.outcome == eligibility.primary.outcome
+    assert requests[1]["provider"]["require_parameters"] is False
+    assert requests[1]["response_format"] == requests[0]["response_format"]
+
+
 def test_synthesis_rejects_changed_primary_and_unsupported_alternative():
     facts, eligibility = _case_and_result()
     changed_primary = eligibility.alternatives[0].outcome

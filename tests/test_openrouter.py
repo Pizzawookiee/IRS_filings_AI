@@ -64,7 +64,28 @@ def test_request_construction_for_supported_media(media_type, expected_type):
     plugin_ids = [plugin["id"] for plugin in seen["plugins"]]
     assert "response-healing" in plugin_ids
     assert ("file-parser" in plugin_ids) is (media_type == "application/pdf")
+    if media_type == "application/pdf":
+        file_parser = next(plugin for plugin in seen["plugins"] if plugin["id"] == "file-parser")
+        assert file_parser["pdf"]["engine"] == "cloudflare-ai"
     assert result.document_type == "w2"
+
+
+def test_retries_parameter_routing_failure_without_strict_filter():
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        if len(requests) == 1:
+            return httpx.Response(404, json={
+                "error": {"message": "No endpoints found that can handle the requested parameters"}
+            })
+        return httpx.Response(200, json=_body())
+
+    result = _parser(handler).parse_bytes(b"pdf", "w2.pdf", "application/pdf")
+    assert result.document_type == "w2"
+    assert requests[0]["provider"]["require_parameters"] is True
+    assert requests[1]["provider"]["require_parameters"] is False
+    assert requests[1]["response_format"] == requests[0]["response_format"]
 
 
 def test_success_is_typed_unattested_and_has_document_provenance():

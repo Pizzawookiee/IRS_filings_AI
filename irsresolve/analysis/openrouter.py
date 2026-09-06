@@ -135,6 +135,13 @@ class OpenRouterAnalysisSynthesizer:
                 headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json", "X-OpenRouter-Title": "IRS Resolve"},
                 json=payload,
             )
+            if self._is_parameter_routing_failure(response):
+                fallback_payload = {**payload, "provider": {"require_parameters": False}}
+                response = client.post(
+                    OPENROUTER_URL,
+                    headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json", "X-OpenRouter-Title": "IRS Resolve"},
+                    json=fallback_payload,
+                )
         except httpx.TimeoutException as exc:
             raise DocumentInferenceError("OpenRouter timed out while synthesizing the analysis") from exc
         except httpx.HTTPError as exc:
@@ -171,3 +178,13 @@ class OpenRouterAnalysisSynthesizer:
         if any(item.outcome not in allowed_alternatives for item in result.alternatives):
             raise DocumentInferenceError("Sonnet introduced an unsupported alternative")
         return result
+
+    @staticmethod
+    def _is_parameter_routing_failure(response: httpx.Response) -> bool:
+        if response.status_code != 404:
+            return False
+        try:
+            message = response.json().get("error", {}).get("message", "")
+        except (ValueError, AttributeError):
+            return False
+        return "no endpoints found that can handle the requested parameters" in message.lower()

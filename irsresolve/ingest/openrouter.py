@@ -195,6 +195,9 @@ class OpenRouterDocumentParser:
         client = self.client or httpx.Client(timeout=self.timeout_seconds)
         try:
             response = client.post(OPENROUTER_URL, headers=headers, json=payload)
+            if self._is_parameter_routing_failure(response):
+                fallback_payload = {**payload, "provider": {"require_parameters": False}}
+                response = client.post(OPENROUTER_URL, headers=headers, json=fallback_payload)
         except httpx.TimeoutException as exc:
             raise DocumentInferenceError("OpenRouter timed out while extracting the document") from exc
         except httpx.HTTPError as exc:
@@ -206,6 +209,16 @@ class OpenRouterDocumentParser:
         if response.status_code >= 400:
             self._raise_api_error(response)
         return self._parse_response(response)
+
+    @staticmethod
+    def _is_parameter_routing_failure(response: httpx.Response) -> bool:
+        if response.status_code != 404:
+            return False
+        try:
+            message = response.json().get("error", {}).get("message", "")
+        except (ValueError, AttributeError):
+            return False
+        return "no endpoints found that can handle the requested parameters" in message.lower()
 
     def _build_payload(self, data: bytes, filename: str, media_type: str) -> dict[str, Any]:
         encoded = base64.b64encode(data).decode("ascii")
@@ -248,7 +261,7 @@ class OpenRouterDocumentParser:
         }
         payload["plugins"] = [{"id": "response-healing"}]
         if media_type == "application/pdf":
-            payload["plugins"].insert(0, {"id": "file-parser", "pdf": {"engine": "native"}})
+            payload["plugins"].insert(0, {"id": "file-parser", "pdf": {"engine": "cloudflare-ai"}})
         return payload
 
     @staticmethod
