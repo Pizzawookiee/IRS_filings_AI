@@ -1,0 +1,11 @@
+# Calm financial-decision-tool palette (UI design doc §11): neutral sidebar, blue as the
+# informational/active accent. Status colors (green/amber/red) come from native st components.
+[theme]
+primaryColor = "#2563eb"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f1f5f9"
+textColor = "#0f172a"
+font = "sans serif"
+
+[server]
+headless = true

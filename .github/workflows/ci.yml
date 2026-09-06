@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pydantic pyyaml streamlit pytest
+      - name: Unit tests
+        run: pytest -q
+      - name: Validate config + rules
+        run: python -m irsresolve.cli validate
+      - name: Worked-example fixtures
+        run: python -m irsresolve.cli fixtures
