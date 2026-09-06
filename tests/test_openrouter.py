@@ -191,12 +191,13 @@ def test_streamlit_upload_boundary_uses_parser():
     assert extract_uploaded_document(b"img", "w2.png", "image/png", FakeParser()) == "proposed"
 
 
-def test_streamlit_intake_renders_real_uploader():
+def test_streamlit_documents_renders_real_uploader_after_questions():
     from streamlit.testing.v1 import AppTest
 
     app_path = Path(__file__).parents[1] / "irsresolve" / "demo" / "app.py"
     app = AppTest.from_file(app_path).run(timeout=20)
-    app.sidebar.radio[0].set_value("Intake").run(timeout=20)
+    app.session_state["questions_complete"] = True
+    app.sidebar.radio[0].set_value("Documents").run(timeout=20)
     assert not app.exception
     assert len(app.get("file_uploader")) == 1
     assert any(button.label == "Extract proposed values" for button in app.button)

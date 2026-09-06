@@ -3,7 +3,8 @@
 [![CI](https://github.com/ShaurjyaContributes/IRS_filings_AI/actions/workflows/ci.yml/badge.svg)](https://github.com/ShaurjyaContributes/IRS_filings_AI/actions/workflows/ci.yml)
 
 A self-serve **eligibility screening engine** for IRS tax-debt resolution programs. A taxpayer
-answers a short branching intake (and optionally uploads documents); the engine runs their
+answers a short questionnaire, uploads the required financial statement, and may add supporting
+documents; the engine runs their
 attested facts through IRS collection rules and returns the programs they likely qualify for — and
 the ones they don't — each with plain-language reasoning, the taxpayer's own numbers, and links to
 the governing IRS source.
@@ -40,18 +41,20 @@ Built end-to-end from five specification documents (in the repo root):
 
 Given a taxpayer's situation, IRS Resolve:
 
-1. **Collects** the minimum facts needed to reach a determination through a branching intake
-   (asking for financial disclosure only when the simple tiers can't resolve the case).
-2. **Ingests** documents (W-2, 1099, Form 433-A, IRS notices) as *proposed* values with
+1. **Collects** the minimum facts needed to understand the taxpayer, debt, compliance, payment
+   capacity, disputes, enforcement activity, and relief circumstances in four short steps.
+2. **Ingests** a required Form 433-A (individual or self-employed) or Form 433-B (business), plus
+   optional W-2, 1099, IRS notice, and transcript files, as *proposed* values with
    provenance — the taxpayer must confirm each before it is used.
 3. **Evaluates** the attested facts against every IRS collection alternative.
-4. **Explains** the result: the recommended path, alternatives and trade-offs, stackable relief,
+4. **Explains** the result: Sonnet organizes the confirmed facts and deterministic result into a
+   personalized overview, followed by the recommended path, alternatives, stackable relief,
    urgent deadlines first, every excluded program with the reason it was excluded, and an official
    IRS citation for each determination.
 
-The eligibility engine runs locally in well under a second. There are **no network calls** at
-evaluation time — citations are static strings from config. Real document extraction is an optional,
-separate OpenRouter network call; its output is always unconfirmed proposed data.
+The eligibility engine itself runs locally with **no network calls** — citations are static strings
+from config. Document extraction and the optional personalized summary are separate OpenRouter
+calls. Sonnet cannot select, add, or change an engine outcome.
 
 ## Programs it screens for
 
@@ -99,16 +102,15 @@ typo fails `validate` rather than at runtime.
 
 ## The three-page UI
 
-The Streamlit demo collapses the many logical intake screens into a stable three-page shell, exactly
-as the UI design doc requires:
+The Streamlit app uses a stable three-page flow:
 
-- **Questions** — owns facts, branching, and attestation. Documents propose facts; only the
-  taxpayer attests them. Layer-2 sections appear only when the engine returns
-  `NEEDS_FINANCIAL_DISCLOSURE`.
-- **Intake** — owns documents. Conditionally requires W-2 (payroll) or 1099 (self-employed); Form
-  433-A, IRS notices, and transcripts are optional high-value uploads. Produces proposed values
-  only — never confirmed here.
-- **Analysis** — owns explanation. Renders the engine result: urgent items first, then the primary
+- **Questions** — four short, branching steps covering profile, debt/compliance, payment/dispute,
+  and urgent issues/relief.
+- **Documents** — requires Form 433-A for an individual or self-employed taxpayer and Form 433-B
+  for a business. W-2s, 1099s, notices, and transcripts are optional. Every extracted value is
+  previewed and must be explicitly confirmed before it becomes an attested fact.
+- **Analysis** — runs the deterministic engine first. Sonnet then creates a schema-constrained
+  explanation without changing the engine result. The page renders urgent items, then the primary
   path, alternatives, stacked relief, "why not other options," professional-referral notices,
   citations, and a "Why?" rule trace.
 
@@ -130,7 +132,8 @@ irsresolve/
     errors.py
   config/         # thresholds.yaml, citations.yaml, outcomes.yaml, poverty.yaml, standards/*.csv
   rules/          # l0_gate.yaml, l1_tiers.yaml, l2_capacity.yaml, l3_flags.yaml (32 rules)
-  ingest/         # DocumentParser protocol + stub W-2/1099/433-A/notice parsers, merge()
+  analysis/       # constrained Sonnet synthesis over confirmed facts + engine result
+  ingest/         # fixture parsers + OpenRouter W-2/1099/433-A/433-B/notice/transcript parser
   render/         # markdown.py renderer
   cli.py          # run / validate / fixtures
   demo/app.py     # three-page Streamlit demo
@@ -203,10 +206,11 @@ $env:OPENROUTER_TIMEOUT_SECONDS = "60"
 ```
 
 Uploads are encoded in memory and transmitted to OpenRouter and its selected inference provider.
-The application does not persist the file. Model and PDF-processing charges apply according to
-OpenRouter's current pricing. The model only extracts data: every value is marked unconfirmed and
-must be reviewed before `merge()` can attest it. Missing credentials, timeouts, and provider errors
-leave the offline fixture/manual workflow available and never alter eligibility results.
+After confirmation, the confirmed facts and deterministic screening result are sent again for the
+personalized explanation. The application does not persist the file. Model and PDF-processing
+charges apply according to OpenRouter's current pricing. Extraction only proposes data, and Sonnet
+cannot determine eligibility. Missing credentials, timeouts, and provider errors leave the
+deterministic analysis and offline examples available.
 
 Supported classifications are W-2, 1099, Form 433-A, Form 433-B, IRS notice, and account transcript.
 Unknown fact paths and invalid values are rejected after inference against the canonical Pydantic
@@ -220,13 +224,16 @@ streamlit run irsresolve/demo/app.py
 
 Then in the browser (opens at http://localhost:8501):
 
-1. In the sidebar, click a **Load an example** button — try **D — PPIA + CDP + FTA**.
-2. The app jumps to **Analysis**, where the Collection Due Process urgent banner renders on top,
+1. Complete the four **Questions** steps.
+2. On **Documents**, upload the required Form 433-A or Form 433-B and optionally add W-2s, 1099s,
+   notices, or transcripts. Review and confirm the proposed values.
+3. The app moves to **Analysis**, where urgent items render on top,
    followed by the recommended Partial Payment IA, the OIC alternative with its offer floor, the
    First Time Abate stacked relief, the "why not other options" exclusions, and the professional
    referral — each with IRS citations. Open **Why? (rule trace)** to see the arithmetic.
-3. Switch to **Intake** to pick a sample document extraction and watch it produce *proposed*
-   (unconfirmed) values, or **Questions** to see the confirm screen with per-field source badges.
+
+For an offline tour, use any **Load an example** button in the sidebar. The deterministic result
+still renders when OpenRouter is not configured.
 
 ## The worked-example fixtures
 
@@ -248,12 +255,13 @@ Layer-3 enforcement and spouse/penalty rules.
 pytest -q
 ```
 
-42 tests cover: derive formulas (hand-computed expected values), the expression evaluator (accepts
+Tests cover: derive formulas (hand-computed expected values), the expression evaluator (accepts
 safe expressions; rejects function calls, imports, comprehensions, lambdas, and out-of-namespace
 access), the engine (Layer-1 termination, `NEEDS_FINANCIAL_DISCLOSURE`, the attestation invariant,
 the FTA rerun), all six fixtures, ingestion (1099 never populates expenses; `merge()` attests only
 accepted proposals), a citation-per-determination check, byte-identical determinism, and a Streamlit
-demo smoke test (load-example → Analysis renders). Continuous integration runs `pytest`, `validate`,
+questions-first fact assembly, constrained Sonnet synthesis, and a Streamlit demo smoke test.
+Continuous integration runs `pytest`, `validate`,
 and `fixtures` on every push (`.github/workflows/ci.yml`).
 
 ## Extending the engine
