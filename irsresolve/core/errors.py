@@ -19,3 +19,15 @@ class RuleLoadError(IRSResolveError):
 
 class RuleRuntimeError(IRSResolveError):
     """A rule expression raised at evaluation time."""
+
+
+class DocumentInferenceError(IRSResolveError):
+    """A document could not be safely converted into proposed facts."""
+
+
+class MissingCredentialsError(DocumentInferenceError):
+    """The OpenRouter API key is not configured."""
+
+
+class UnsupportedDocumentError(DocumentInferenceError):
+    """The uploaded document type or size is unsupported."""

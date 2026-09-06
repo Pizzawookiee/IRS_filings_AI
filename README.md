@@ -47,8 +47,9 @@ Given a taxpayer's situation, IRS Resolve:
    urgent deadlines first, every excluded program with the reason it was excluded, and an official
    IRS citation for each determination.
 
-Everything runs locally in well under a second. There are **no network calls** at evaluation time —
-citations are static strings from config.
+The eligibility engine runs locally in well under a second. There are **no network calls** at
+evaluation time — citations are static strings from config. Real document extraction is an optional,
+separate OpenRouter network call; its output is always unconfirmed proposed data.
 
 ## Programs it screens for
 
@@ -137,14 +138,14 @@ tests/            # 39 tests
 
 ## Quick start
 
-Requires **Python 3.11+**. Runtime dependencies: Pydantic v2, PyYAML, Streamlit (plus pytest for
-tests). Nothing else.
+Requires **Python 3.11+**. Runtime dependencies: HTTPX, Pydantic v2, PyYAML, and Streamlit (plus
+pytest for tests).
 
 ```bash
 # from the repo root
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install pydantic pyyaml streamlit pytest
+pip install -e . pytest
 ```
 
 Verify everything loads and the worked examples resolve correctly:
@@ -176,12 +177,38 @@ python -m irsresolve.cli run fixtures/case_d_ppia_cdp.json --md --trace
 # Machine-readable JSON instead of Markdown
 python -m irsresolve.cli run fixtures/case_b_cnc_oic.json --json
 
+# Extract proposed facts from a real tax document through OpenRouter
+python -m irsresolve.cli extract path/to/tax-document.pdf
+
 # Point at an alternate config/rules directory (e.g. to test a threshold change)
 python -m irsresolve.cli --config irsresolve/config --rules irsresolve/rules fixtures
 ```
 
 `run` reads a JSON case file (`{ "as_of", "facts", "_expected" }`), where `as_of` fixes the
 evaluation date so CSED and CDP-window math is reproducible.
+
+### OpenRouter document extraction
+
+IRS Resolve can use Claude Sonnet 5 through OpenRouter to classify and extract proposed facts from
+PDF, PNG, JPEG, and WebP tax documents (20 MB maximum per file). Configure it with environment
+variables; never commit a key:
+
+```powershell
+$env:OPENROUTER_API_KEY = "your-rotated-key"
+# Optional defaults shown below
+$env:OPENROUTER_MODEL = "anthropic/claude-sonnet-5"
+$env:OPENROUTER_TIMEOUT_SECONDS = "60"
+```
+
+Uploads are encoded in memory and transmitted to OpenRouter and its selected inference provider.
+The application does not persist the file. Model and PDF-processing charges apply according to
+OpenRouter's current pricing. The model only extracts data: every value is marked unconfirmed and
+must be reviewed before `merge()` can attest it. Missing credentials, timeouts, and provider errors
+leave the offline fixture/manual workflow available and never alter eligibility results.
+
+Supported classifications are W-2, 1099, Form 433-A, Form 433-B, IRS notice, and account transcript.
+Unknown fact paths and invalid values are rejected after inference against the canonical Pydantic
+models. A 1099 is treated as gross receipts and can never propose expense values.
 
 ## Running the demo app
 

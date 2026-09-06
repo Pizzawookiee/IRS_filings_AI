@@ -1,0 +1,314 @@
+"""OpenRouter-powered document extraction.
+
+The model is an untrusted parser, never a decision maker. Its structured response is validated
+against the canonical Facts model and returned only as unattested ProposedFacts.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import mimetypes
+import os
+import types
+from pathlib import Path
+from typing import Any, Literal, Union, get_args, get_origin
+
+import httpx
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+
+from ..core.errors import DocumentInferenceError, MissingCredentialsError, UnsupportedDocumentError
+from ..core.facts import Attested, Facts, ProposedFacts
+
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+DEFAULT_MODEL = "anthropic/claude-sonnet-5"
+DEFAULT_TIMEOUT_SECONDS = 60.0
+MAX_FILE_BYTES = 20 * 1024 * 1024
+SUPPORTED_MEDIA_TYPES = {
+    "application/pdf",
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+}
+MEDIA_TYPE_BY_SUFFIX = {
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+}
+DocumentType = Literal["w2", "1099", "433a", "433b", "notice", "transcript"]
+SOURCE_BY_DOCUMENT_TYPE = {
+    "w2": "w2",
+    "1099": "1099",
+    "433a": "433a",
+    "433b": "433b",
+    "notice": "notice",
+    "transcript": "transcript",
+}
+
+
+class ExtractionValue(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str
+    value: Any
+    ref: str = Field(min_length=1, max_length=200)
+
+
+class ExtractionEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    document_type: DocumentType
+    values: list[ExtractionValue]
+
+
+def _strip_optional(annotation: Any) -> Any:
+    origin = get_origin(annotation)
+    if origin in (Union, types.UnionType):
+        args = tuple(a for a in get_args(annotation) if a is not type(None))
+        if len(args) == 1:
+            return args[0]
+    return annotation
+
+
+def _canonical_leaf_annotations() -> dict[str, Any]:
+    leaves: dict[str, Any] = {}
+
+    def visit(model: type[BaseModel], prefix: str = "") -> None:
+        for name, field in model.model_fields.items():
+            path = f"{prefix}.{name}" if prefix else name
+            annotation = _strip_optional(field.annotation)
+            if isinstance(annotation, type) and issubclass(annotation, Attested):
+                leaves[path] = annotation
+            elif isinstance(annotation, type) and issubclass(annotation, BaseModel):
+                visit(annotation, path)
+
+    visit(Facts)
+    return leaves
+
+
+CANONICAL_LEAVES = _canonical_leaf_annotations()
+CANONICAL_PATHS = tuple(sorted(CANONICAL_LEAVES))
+
+SYSTEM_PROMPT = """You extract facts from US tax documents for an IRS eligibility screener.
+You do not give advice or decide eligibility. Classify the document as exactly one of: w2, 1099,
+433a, 433b, notice, transcript. Return only facts explicitly supported by the document, using only
+the allowed canonical paths. Do not infer missing values. Use ISO YYYY-MM-DD dates and plain decimal
+numbers without currency symbols. For annual W-2 wages/withholding or 1099 gross receipts, convert
+to monthly amounts by dividing by 12 and name the source box in ref. A 1099 is gross income and must
+never populate any expenses.* path. For every value provide a concise page, box, line, or section
+reference. Collection-valued paths such as debt.tax_periods must be returned once with the complete
+list, never as duplicate paths. If the document contains no supported values, return an empty values
+array."""
+
+
+def _response_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "document_type": {
+                "type": "string",
+                "enum": list(SOURCE_BY_DOCUMENT_TYPE),
+            },
+            "values": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "path": {"type": "string", "enum": list(CANONICAL_PATHS)},
+                        "value": {},
+                        "ref": {"type": "string"},
+                    },
+                    "required": ["path", "value", "ref"],
+                },
+            },
+        },
+        "required": ["document_type", "values"],
+    }
+
+
+class OpenRouterDocumentParser:
+    """Extract supported tax-document values through OpenRouter and validate every proposal."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        model: str | None = None,
+        timeout_seconds: float | None = None,
+        client: httpx.Client | None = None,
+    ) -> None:
+        self.api_key = api_key if api_key is not None else os.getenv("OPENROUTER_API_KEY")
+        self.model = model or os.getenv("OPENROUTER_MODEL", DEFAULT_MODEL)
+        self.timeout_seconds = self._timeout_from_env() if timeout_seconds is None else timeout_seconds
+        if self.timeout_seconds <= 0:
+            raise DocumentInferenceError("timeout_seconds must be greater than zero")
+        self.client = client
+
+    @staticmethod
+    def _timeout_from_env() -> float:
+        raw = os.getenv("OPENROUTER_TIMEOUT_SECONDS")
+        if not raw:
+            return DEFAULT_TIMEOUT_SECONDS
+        try:
+            value = float(raw)
+        except ValueError as exc:
+            raise DocumentInferenceError("OPENROUTER_TIMEOUT_SECONDS must be a number") from exc
+        if value <= 0:
+            raise DocumentInferenceError("OPENROUTER_TIMEOUT_SECONDS must be greater than zero")
+        return value
+
+    def parse(self, path: str | Path) -> ProposedFacts:
+        file_path = Path(path)
+        media_type = (
+            MEDIA_TYPE_BY_SUFFIX.get(file_path.suffix.lower())
+            or mimetypes.guess_type(file_path.name)[0]
+            or "application/octet-stream"
+        )
+        return self.parse_bytes(file_path.read_bytes(), file_path.name, media_type)
+
+    def parse_bytes(self, data: bytes, filename: str, media_type: str) -> ProposedFacts:
+        media_type = media_type.lower().split(";", 1)[0].strip()
+        if media_type not in SUPPORTED_MEDIA_TYPES:
+            raise UnsupportedDocumentError(
+                f"Unsupported document type {media_type!r}; use PDF, PNG, JPEG, or WebP"
+            )
+        if not data:
+            raise UnsupportedDocumentError("The uploaded document is empty")
+        if len(data) > MAX_FILE_BYTES:
+            raise UnsupportedDocumentError("The uploaded document exceeds the 20 MB limit")
+        if not self.api_key:
+            raise MissingCredentialsError("Set OPENROUTER_API_KEY before extracting documents")
+
+        payload = self._build_payload(data, filename, media_type)
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "X-OpenRouter-Title": "IRS Resolve",
+        }
+        owns_client = self.client is None
+        client = self.client or httpx.Client(timeout=self.timeout_seconds)
+        try:
+            response = client.post(OPENROUTER_URL, headers=headers, json=payload)
+        except httpx.TimeoutException as exc:
+            raise DocumentInferenceError("OpenRouter timed out while extracting the document") from exc
+        except httpx.HTTPError as exc:
+            raise DocumentInferenceError(f"Could not reach OpenRouter: {exc}") from exc
+        finally:
+            if owns_client:
+                client.close()
+
+        if response.status_code >= 400:
+            self._raise_api_error(response)
+        return self._parse_response(response)
+
+    def _build_payload(self, data: bytes, filename: str, media_type: str) -> dict[str, Any]:
+        encoded = base64.b64encode(data).decode("ascii")
+        data_url = f"data:{media_type};base64,{encoded}"
+        if media_type == "application/pdf":
+            attachment: dict[str, Any] = {
+                "type": "file",
+                "file": {"filename": filename, "file_data": data_url},
+            }
+        else:
+            attachment = {"type": "image_url", "image_url": {"url": data_url}}
+
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Classify this tax document and extract supported proposed facts.",
+                        },
+                        attachment,
+                    ],
+                },
+            ],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "irs_document_extraction",
+                    "strict": True,
+                    "schema": _response_schema(),
+                },
+            },
+            "temperature": 0,
+            "max_completion_tokens": 4096,
+            "stream": False,
+        }
+        if media_type == "application/pdf":
+            payload["plugins"] = [{"id": "file-parser", "pdf": {"engine": "native"}}]
+        return payload
+
+    @staticmethod
+    def _raise_api_error(response: httpx.Response) -> None:
+        messages = {
+            401: "OpenRouter rejected the API key",
+            402: "OpenRouter credits are exhausted",
+            429: "OpenRouter rate limit reached; try again shortly",
+        }
+        message = messages.get(response.status_code, f"OpenRouter request failed ({response.status_code})")
+        try:
+            detail = response.json().get("error", {}).get("message")
+        except (ValueError, AttributeError):
+            detail = None
+        if detail and response.status_code not in (401, 402):
+            message = f"{message}: {detail}"
+        raise DocumentInferenceError(message)
+
+    @staticmethod
+    def _message_text(message: dict[str, Any]) -> str:
+        if message.get("refusal"):
+            raise DocumentInferenceError("The model refused to process this document")
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return "".join(
+                part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text"
+            )
+        return ""
+
+    def _parse_response(self, response: httpx.Response) -> ProposedFacts:
+        try:
+            body = response.json()
+            message = body["choices"][0]["message"]
+            content = self._message_text(message)
+            raw = json.loads(content)
+            extraction = ExtractionEnvelope.model_validate(raw)
+        except DocumentInferenceError:
+            raise
+        except (ValueError, KeyError, IndexError, TypeError, ValidationError) as exc:
+            raise DocumentInferenceError("OpenRouter returned an invalid structured extraction") from exc
+        if not extraction.values:
+            raise DocumentInferenceError("No supported facts were found in the document")
+
+        source = SOURCE_BY_DOCUMENT_TYPE[extraction.document_type]
+        proposals: dict[str, dict[str, Any]] = {}
+        for item in extraction.values:
+            if item.path not in CANONICAL_LEAVES:
+                raise DocumentInferenceError(f"Model returned unknown fact path: {item.path}")
+            if extraction.document_type == "1099" and item.path.startswith("expenses."):
+                raise DocumentInferenceError("A 1099 extraction cannot propose expense values")
+            if item.path in proposals:
+                raise DocumentInferenceError(f"Model returned duplicate fact path: {item.path}")
+            wrapped = {
+                "value": item.value,
+                "provenance": {"source": source, "ref": item.ref, "attested": False},
+            }
+            try:
+                validated = TypeAdapter(CANONICAL_LEAVES[item.path]).validate_python(wrapped)
+            except ValidationError as exc:
+                raise DocumentInferenceError(f"Invalid value for {item.path}: {exc.errors()[0]['msg']}") from exc
+            proposals[item.path] = {
+                "value": validated.value,
+                "source": source,
+                "ref": item.ref,
+                "attested": False,
+            }
+        return ProposedFacts(document_type=extraction.document_type, values=proposals)

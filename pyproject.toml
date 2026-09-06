@@ -3,8 +3,14 @@ name = "irsresolve"
 version = "1.0.0"
 description = "IRS Resolve v1 — self-serve eligibility screening engine for IRS tax-debt resolution"
 requires-python = ">=3.11"
-dependencies = ["pydantic>=2", "pyyaml", "streamlit"]
+dependencies = ["httpx>=0.27", "pydantic>=2", "pyyaml", "streamlit"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+include = ["irsresolve*"]
+
+[tool.setuptools.package-data]
+irsresolve = ["config/**/*.yaml", "config/**/*.csv", "rules/*.yaml"]

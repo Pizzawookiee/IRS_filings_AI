@@ -19,7 +19,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 from typing import Generic, Literal, Optional, TypeVar
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .errors import FactsError
 
@@ -221,8 +221,9 @@ class ProposedFacts(BaseModel):
     Merged into Facts only after the confirm step flips attested=True (ingest.base.merge).
     """
 
-    model_config = ConfigDict(extra="allow")  # parsers fill a loose subset of paths
-    values: dict = {}  # {dotted_path: {"value": ..., "provenance": {...}}}
+    model_config = ConfigDict(extra="forbid")
+    document_type: Optional[Literal["w2", "1099", "433a", "433b", "notice", "transcript"]] = None
+    values: dict = Field(default_factory=dict)  # path -> value/source/ref/attested proposal
 
 
 # ---- helpers: attestation check, unwrap view, provenance map ----

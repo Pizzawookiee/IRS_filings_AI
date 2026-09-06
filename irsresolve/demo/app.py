@@ -23,6 +23,7 @@ from irsresolve.core.expr import Validator
 from irsresolve.core.facts import Facts, provenance_map
 from irsresolve.core.rules import load_rules
 from irsresolve.ingest.fixtures import F433AFixture, F1099Fixture, NoticeFixture, W2Fixture
+from irsresolve.ingest.openrouter import OpenRouterDocumentParser
 from irsresolve.render.markdown import to_markdown
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -56,6 +57,11 @@ def _load_example(fname: str):
     st.session_state.as_of = data.get("as_of", date.today().isoformat())
     st.session_state.proposed = {}
     st.session_state.page = "Analysis"
+
+
+def extract_uploaded_document(data: bytes, filename: str, media_type: str, parser=None):
+    """Small testable boundary between Streamlit uploads and the OpenRouter parser."""
+    return (parser or OpenRouterDocumentParser()).parse_bytes(data, filename, media_type)
 
 
 # ---- pages ----
@@ -114,7 +120,34 @@ def page_intake():
     st.subheader("Optional, high-value")
     st.write("Form 433-A — *optional, saves time* · IRS notice · Account transcript")
 
-    st.subheader("Upload (demo: pick a sample extraction)")
+    st.subheader("Upload a document")
+    st.warning(
+        "Tax documents contain sensitive personal and financial data. Files uploaded here are "
+        "sent to OpenRouter and its selected inference provider for extraction. Extracted values "
+        "remain unconfirmed until you review them."
+    )
+    uploads = st.file_uploader(
+        "PDF, PNG, JPEG, or WebP (20 MB maximum per file)",
+        type=["pdf", "png", "jpg", "jpeg", "webp"],
+        accept_multiple_files=True,
+    )
+    if st.button("Extract proposed values", disabled=not uploads, type="primary"):
+        for upload in uploads or []:
+            try:
+                with st.spinner(f"Classifying and extracting {upload.name}…"):
+                    proposed = extract_uploaded_document(
+                        upload.getvalue(), upload.name, upload.type or "application/octet-stream"
+                    )
+                st.session_state.proposed.update(proposed.values)
+                st.success(
+                    f"{upload.name}: {proposed.document_type} — "
+                    f"{len(proposed.values)} proposed values ready to review"
+                )
+                st.json({k: str(v["value"]) for k, v in proposed.values.items()})
+            except Exception as e:  # noqa: BLE001 — UI boundary must keep manual workflow available
+                st.error(f"{upload.name}: extraction failed — {e}")
+
+    st.subheader("Offline demo extraction")
     docs = sorted(p.name for p in (FIXTURES / "docs").glob("*.json"))
     pick = st.selectbox("Sample document", ["—"] + docs)
     if pick != "—":
@@ -125,7 +158,10 @@ def page_intake():
             st.success(f"{len(proposed.values)} proposed values found (not yet confirmed)")
             st.json({k: str(v["value"]) for k, v in proposed.values.items()})
     if st.session_state.proposed:
-        st.info(f"{len(st.session_state.proposed)} proposed values pending review.")
+        st.info(
+            f"{len(st.session_state.proposed)} proposed values pending review. They have not "
+            "changed the eligibility analysis."
+        )
     if st.button("Review questions →"):
         st.session_state.page = "Questions"
         st.rerun()
@@ -165,8 +201,12 @@ def main():
     _ss()
     with st.sidebar:
         st.title("IRS Resolve")
-        st.session_state.page = st.radio("", ["Questions", "Intake", "Analysis"],
-                                         index=["Questions", "Intake", "Analysis"].index(st.session_state.page))
+        st.session_state.page = st.radio(
+            "Navigation",
+            ["Questions", "Intake", "Analysis"],
+            index=["Questions", "Intake", "Analysis"].index(st.session_state.page),
+            label_visibility="collapsed",
+        )
         st.divider()
         st.caption("Load an example")
         for label, fname in EXAMPLES.items():

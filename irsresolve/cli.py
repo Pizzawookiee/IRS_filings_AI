@@ -3,6 +3,7 @@
     python -m irsresolve.cli validate
     python -m irsresolve.cli fixtures
     python -m irsresolve.cli run <facts.json> [--json | --md] [--trace]
+    python -m irsresolve.cli extract <document>
 
 Engine/renderer are imported lazily so `validate` works before those modules land.
 """
@@ -35,7 +36,7 @@ def cmd_validate(args) -> int:
     except IRSResolveError as e:
         print(f"validate: FAIL — {e}", file=sys.stderr)
         return 1
-    print(f"validate: OK — config_version={cfg.version}, {len(rules)} rules loaded")
+    print(f"validate: OK - config_version={cfg.version}, {len(rules)} rules loaded")
     return 0
 
 
@@ -71,11 +72,25 @@ def cmd_fixtures(args) -> int:
         exp = data.get("_expected", {})
         problems = _check_expected(result, exp)
         status = "OK" if not problems else "FAIL"
-        print(f"{path.name}: {status} → primary={result.primary.outcome}")
+        print(f"{path.name}: {status} -> primary={result.primary.outcome}")
         for p in problems:
             print(f"    - {p}")
         failures += bool(problems)
     return 1 if failures else 0
+
+
+def cmd_extract(args) -> int:
+    """Extract unattested proposed facts from one real document through OpenRouter."""
+    from .core.errors import DocumentInferenceError
+    from .ingest.openrouter import OpenRouterDocumentParser
+
+    try:
+        proposed = OpenRouterDocumentParser().parse(args.document)
+    except (DocumentInferenceError, OSError) as e:
+        print(f"extract: FAIL - {e}", file=sys.stderr)
+        return 1
+    print(json.dumps(proposed.model_dump(mode="json"), indent=2))
+    return 0
 
 
 def _check_expected(result, exp) -> list[str]:
@@ -104,6 +119,8 @@ def main(argv=None) -> int:
 
     sub.add_parser("validate")
     sub.add_parser("fixtures")
+    x = sub.add_parser("extract")
+    x.add_argument("document")
     r = sub.add_parser("run")
     r.add_argument("facts")
     r.add_argument("--json", dest="json_out", action="store_true")
@@ -111,7 +128,12 @@ def main(argv=None) -> int:
     r.add_argument("--trace", action="store_true")
 
     args = p.parse_args(argv)
-    return {"validate": cmd_validate, "fixtures": cmd_fixtures, "run": cmd_run}[args.cmd](args)
+    return {
+        "validate": cmd_validate,
+        "fixtures": cmd_fixtures,
+        "extract": cmd_extract,
+        "run": cmd_run,
+    }[args.cmd](args)
 
 
 if __name__ == "__main__":
