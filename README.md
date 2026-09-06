@@ -1,5 +1,7 @@
 # IRS Resolve v1
 
+[![CI](https://github.com/ShaurjyaContributes/IRS_filings_AI/actions/workflows/ci.yml/badge.svg)](https://github.com/ShaurjyaContributes/IRS_filings_AI/actions/workflows/ci.yml)
+
 A self-serve **eligibility screening engine** for IRS tax-debt resolution programs. A taxpayer
 answers a short branching intake (and optionally uploads documents); the engine runs their
 attested facts through IRS collection rules and returns the programs they likely qualify for — and
@@ -234,8 +236,11 @@ Then in the browser (opens at http://localhost:8501):
 | **B** `case_b_cnc_oic` | Self-employed, $41k, negative disposable income | `CNC` primary, `OIC_DATC` alternative, low-income fee waiver + LITC referral |
 | **C** `case_c_business_blocked` | S-corp with missed federal tax deposits | `BLOCKER_COMPLIANCE` — must get current before any program |
 | **D** `case_d_ppia_cdp` | Individual, $68.4k, active CDP deadline | `PPIA_CANDIDATE` (referral) + `OIC_DATC` alt + `FTA` rerun + `CDP_WINDOW_OPEN` urgent |
+| **E** `case_e_enforcement` | Individual, $18k, wage levy + lien + passport certified | `SIMPLE_PAYMENT_PLAN` + `URGENT_LEVY_RELEASE` + lien withdrawal + passport reversal |
+| **F** `case_f_spouse_penalty` | Individual, joint return, penalties + spouse issues | `SIMPLE_PAYMENT_PLAN` + FTA / reasonable-cause / statutory relief + innocent & injured spouse |
 
-These mirror the architecture document's worked examples (§8.3 / §11).
+A/B/C/D mirror the architecture document's worked examples (§8.3 / §11); E and F exercise the
+Layer-3 enforcement and spouse/penalty rules.
 
 ## Running the tests
 
@@ -243,11 +248,13 @@ These mirror the architecture document's worked examples (§8.3 / §11).
 pytest -q
 ```
 
-39 tests cover: derive formulas (hand-computed expected values), the expression evaluator (accepts
+42 tests cover: derive formulas (hand-computed expected values), the expression evaluator (accepts
 safe expressions; rejects function calls, imports, comprehensions, lambdas, and out-of-namespace
 access), the engine (Layer-1 termination, `NEEDS_FINANCIAL_DISCLOSURE`, the attestation invariant,
-the FTA rerun), all four fixtures, ingestion (1099 never populates expenses; `merge()` attests only
-accepted proposals), a citation-per-determination check, and byte-identical determinism.
+the FTA rerun), all six fixtures, ingestion (1099 never populates expenses; `merge()` attests only
+accepted proposals), a citation-per-determination check, byte-identical determinism, and a Streamlit
+demo smoke test (load-example → Analysis renders). Continuous integration runs `pytest`, `validate`,
+and `fixtures` on every push (`.github/workflows/ci.yml`).
 
 ## Extending the engine
 

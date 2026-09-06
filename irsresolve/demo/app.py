@@ -24,7 +24,18 @@ from irsresolve.core.facts import Facts, provenance_map
 from irsresolve.core.rules import load_rules
 from irsresolve.ingest.fixtures import F433AFixture, F1099Fixture, NoticeFixture, W2Fixture
 from irsresolve.ingest.openrouter import OpenRouterDocumentParser
-from irsresolve.render.markdown import to_markdown
+
+CSS = """
+<style>
+  .block-container {padding-top: 2.5rem; max-width: 1100px;}
+  section[data-testid="stSidebar"] {background: #0f172a;}
+  section[data-testid="stSidebar"] * {color: #e2e8f0;}
+  section[data-testid="stSidebar"] .stButton button {
+    background:#1e293b; border:1px solid #334155; color:#e2e8f0; text-align:left;}
+  section[data-testid="stSidebar"] .stButton button:hover {border-color:#2563eb;}
+  div[data-testid="stMetricValue"] {font-size: 1.15rem;}
+</style>
+"""
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = ROOT / "fixtures"
@@ -167,37 +178,124 @@ def page_intake():
         st.rerun()
 
 
+def _money(x) -> str:
+    return f"${float(x):,.0f}"
+
+
+def _cites(cites) -> str:
+    return "Sources: " + " · ".join(f"[{c.source}]({c.url})" for c in cites) if cites else ""
+
+
+def _chips(result):
+    s = result.inputs_summary
+    prov = s.get("provenance", {})
+    ttype = prov.get("identity.taxpayer_type", {}).get("value", "—")
+    status = ("🔴 Urgent" if result.urgent
+              else "🟠 Blocked" if result.primary.outcome.startswith("BLOCKER")
+              else "🟢 Ready")
+    c = st.columns(4)
+    c[0].metric("Taxpayer", str(ttype).replace("_", " ").title())
+    c[1].metric("Total debt", _money(s.get("total_debt", 0)))
+    c[2].metric("Statute left", f"{s.get('csed_months_remaining', '—')} mo")
+    c[3].metric("Status", status)
+
+
+def _card(det):
+    with st.container(border=True):
+        st.markdown(f"#### {det.display_name}")
+        if det.reason:
+            st.write(det.reason.strip())
+        e = det.extras
+        if "monthly_payment" in e:
+            st.markdown(f"**Estimated monthly payment:** {_money(e['monthly_payment'])}")
+        if "offer_floor_lump" in e:
+            st.markdown(f"**Offer floor:** {_money(e['offer_floor_lump'])} lump / "
+                        f"{_money(e['offer_floor_periodic'])} periodic")
+        if "days_remaining" in e:
+            st.markdown(f"**{int(float(e['days_remaining']))} days remaining**")
+        if det.professional_referral_recommended:
+            st.warning(f"👤 **Consult a professional.** {det.referral_reason or ''}".rstrip())
+        meta = " · ".join(filter(None, [
+            ("Forms: " + ", ".join(det.forms)) if det.forms else "",
+            det.what_happens_next or "",
+        ]))
+        if meta:
+            st.caption(meta)
+        if det.citations:
+            st.caption(_cites(det.citations))
+
+
 def page_analysis():
     st.header("Analysis")
     facts = st.session_state.facts
     if not facts:
-        st.info("No case yet. Load an example or complete Questions and Intake first.")
+        st.info("No case yet. Load an example from the sidebar, or complete Questions and Intake.")
         return
     try:
         model = Facts.model_validate(facts)
     except Exception as e:  # noqa: BLE001
         st.error(f"More information needed before analysis: {e}")
         return
-    cfg, engine = get_engine()
+    _cfg, engine = get_engine()
     try:
         result = engine.evaluate(model, as_of=date.fromisoformat(st.session_state.as_of))
     except Exception as e:  # noqa: BLE001
         st.warning(f"Cannot analyze yet: {e}")
         return
 
+    _chips(result)
+    st.divider()
+
     if result.primary.outcome == "NEEDS_FINANCIAL_DISCLOSURE":
         st.warning("**More information needed** — answer the household, income, expense, and asset "
                    f"questions. Missing: {', '.join(result.primary.extras.get('missing_groups', []))}")
         return
 
-    st.markdown(to_markdown(result), unsafe_allow_html=True)
+    # Urgent first — outrank the ordinary recommendation.
+    for u in result.urgent:
+        st.error(f"⚠️ **{u.display_name}** — {u.reason.strip()}")
+        _card(u)
+
+    if result.primary.outcome.startswith("BLOCKER"):
+        st.error(f"🚧 **{result.primary.display_name}**")
+        _card(result.primary)
+    else:
+        st.success(f"✅ **Recommended: {result.primary.display_name}**")
+        _card(result.primary)
+
+    if result.alternatives:
+        st.subheader("Alternatives & trade-offs")
+        for a in result.alternatives:
+            _card(a)
+
+    if result.stacked_relief:
+        st.subheader("Additional relief you may stack")
+        for s in result.stacked_relief:
+            _card(s)
+
+    sc = result.scenario_if_penalties_abated
+    if sc:
+        change = (f"changes your path to **{sc.primary}**." if sc.changed
+                  else f"leaves your path unchanged (**{sc.primary}**).")
+        st.info(f"**If eligible penalties are removed,** your balance drops to {_money(sc.total_debt)} — this {change}")
+
+    if result.excluded:
+        with st.expander("Why not other options?"):
+            for x in result.excluded:
+                st.markdown(f"- **{x.display_name}** — {x.reason.strip()}  \n  {_cites(x.citations)}")
+
+    for r in result.referrals:
+        st.warning(f"👤 {r.get('reason', '')}")
+
+    st.caption(result.disclaimer)
     with st.expander("Why? (rule trace)"):
         for t in result.trace:
             st.markdown(f"`{'✓' if t.matched else '✗'}` **{t.rule_id}** ({t.layer}) — {t.when_resolved}")
 
 
 def main():
-    st.set_page_config(page_title="IRS Resolve", layout="wide")
+    st.set_page_config(page_title="IRS Resolve", page_icon="🧾", layout="wide")
+    st.markdown(CSS, unsafe_allow_html=True)
     _ss()
     with st.sidebar:
         st.title("IRS Resolve")

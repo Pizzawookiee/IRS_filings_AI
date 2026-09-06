@@ -1,0 +1,26 @@
+{
+  "as_of": "2026-09-06",
+  "facts": {
+    "identity": {"taxpayer_type": "individual", "age": 44},
+    "debt": {
+      "tax_periods": [
+        {"year": 2024, "tax_type": "income_1040", "tax": 12000, "penalty": 2000, "interest": 1000,
+         "assessment_date": "2024-06-01", "return_filed_date": "2024-06-01", "return_due_date": "2025-04-15",
+         "filed_jointly": true}
+      ],
+      "liability_disputed": false
+    },
+    "compliance": {"returns_filed_all": true, "bankruptcy_status": "none"},
+    "quick_capacity": {"can_full_pay_180_days": false, "proposed_monthly_payment": 500,
+                       "prior_5yr_compliance": false, "prior_ia_in_5yrs": false},
+    "enforcement": {"enforcement_flags": ["none"]},
+    "circumstances": {"prior_3yr_penalty_history": false, "penalty_reason_category": "illness",
+                      "combat_zone": true, "disaster_zone_resident": false,
+                      "hardship_circumstances": ["serious_illness"],
+                      "spouse_issues": ["separated_or_divorced", "refund_offset_to_spouse_debt"]}
+  },
+  "_expected": {"primary": "SIMPLE_PAYMENT_PLAN", "alternatives": [],
+                "flags": ["FTA_ELIGIBLE", "REASONABLE_CAUSE_CANDIDATE", "STATUTORY_PENALTY_RELIEF",
+                          "INNOCENT_SPOUSE_CANDIDATE", "INJURED_SPOUSE_8379"],
+                "urgent": []}
+}
