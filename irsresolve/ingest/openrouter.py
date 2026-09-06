@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import mimetypes
 import os
+import re
 import types
 from pathlib import Path
 from typing import Any, Literal, Union, get_args, get_origin
@@ -19,6 +21,8 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from ..core.errors import DocumentInferenceError, MissingCredentialsError, UnsupportedDocumentError
 from ..core.facts import Attested, Facts, ProposedFacts
+
+logger = logging.getLogger(__name__)
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = "anthropic/claude-sonnet-5"
@@ -240,9 +244,11 @@ class OpenRouterDocumentParser:
             "temperature": 0,
             "max_completion_tokens": 4096,
             "stream": False,
+            "provider": {"require_parameters": True},
         }
+        payload["plugins"] = [{"id": "response-healing"}]
         if media_type == "application/pdf":
-            payload["plugins"] = [{"id": "file-parser", "pdf": {"engine": "native"}}]
+            payload["plugins"].insert(0, {"id": "file-parser", "pdf": {"engine": "native"}})
         return payload
 
     @staticmethod
@@ -262,10 +268,14 @@ class OpenRouterDocumentParser:
         raise DocumentInferenceError(message)
 
     @staticmethod
-    def _message_text(message: dict[str, Any]) -> str:
+    def _message_content(message: dict[str, Any]) -> str | dict[str, Any]:
         if message.get("refusal"):
             raise DocumentInferenceError("The model refused to process this document")
+        if isinstance(message.get("parsed"), dict):
+            return message["parsed"]
         content = message.get("content")
+        if isinstance(content, dict):
+            return content
         if isinstance(content, str):
             return content
         if isinstance(content, list):
@@ -274,17 +284,59 @@ class OpenRouterDocumentParser:
             )
         return ""
 
+    @staticmethod
+    def _decode_json_content(content: str | dict[str, Any]) -> dict[str, Any]:
+        if isinstance(content, dict):
+            return content
+        text = content.strip()
+        fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", text, flags=re.DOTALL | re.IGNORECASE)
+        if fenced:
+            text = fenced.group(1)
+        try:
+            decoded = json.loads(text)
+            if isinstance(decoded, str):
+                decoded = json.loads(decoded)
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise DocumentInferenceError(
+                "OpenRouter returned malformed JSON; retry the extraction"
+            ) from exc
+        if not isinstance(decoded, dict):
+            raise DocumentInferenceError("OpenRouter extraction must be a JSON object")
+        return decoded
+
     def _parse_response(self, response: httpx.Response) -> ProposedFacts:
         try:
             body = response.json()
+        except ValueError as exc:
+            raise DocumentInferenceError("OpenRouter returned a non-JSON HTTP response") from exc
+        try:
             message = body["choices"][0]["message"]
-            content = self._message_text(message)
-            raw = json.loads(content)
+        except (KeyError, IndexError, TypeError) as exc:
+            logger.warning("OpenRouter response missing choices[0].message; keys=%s", sorted(body) if isinstance(body, dict) else [])
+            raise DocumentInferenceError("OpenRouter response did not contain a model message") from exc
+
+        content = self._message_content(message)
+        if not content:
+            finish_reason = body.get("choices", [{}])[0].get("finish_reason", "unknown")
+            logger.warning("OpenRouter returned empty extraction content; finish_reason=%s", finish_reason)
+            raise DocumentInferenceError(
+                f"OpenRouter returned no extraction content (finish reason: {finish_reason})"
+            )
+        raw = self._decode_json_content(content)
+        try:
             extraction = ExtractionEnvelope.model_validate(raw)
-        except DocumentInferenceError:
-            raise
-        except (ValueError, KeyError, IndexError, TypeError, ValidationError) as exc:
-            raise DocumentInferenceError("OpenRouter returned an invalid structured extraction") from exc
+        except ValidationError as exc:
+            first = exc.errors(include_input=False)[0]
+            location = ".".join(str(part) for part in first.get("loc", ())) or "response"
+            detail = first.get("msg", "invalid value")
+            logger.warning(
+                "OpenRouter extraction schema mismatch; location=%s type=%s",
+                location,
+                first.get("type", "unknown"),
+            )
+            raise DocumentInferenceError(
+                f"OpenRouter extraction schema mismatch at {location}: {detail}"
+            ) from exc
         if not extraction.values:
             raise DocumentInferenceError("No supported facts were found in the document")
 

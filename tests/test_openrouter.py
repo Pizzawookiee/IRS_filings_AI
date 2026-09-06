@@ -60,7 +60,10 @@ def test_request_construction_for_supported_media(media_type, expected_type):
     assert attachment["type"] == expected_type
     assert seen["model"] == "anthropic/claude-sonnet-5"
     assert seen["response_format"]["type"] == "json_schema"
-    assert ("plugins" in seen) is (media_type == "application/pdf")
+    assert seen["provider"] == {"require_parameters": True}
+    plugin_ids = [plugin["id"] for plugin in seen["plugins"]]
+    assert "response-healing" in plugin_ids
+    assert ("file-parser" in plugin_ids) is (media_type == "application/pdf")
     assert result.document_type == "w2"
 
 
@@ -106,7 +109,7 @@ def test_1099_cannot_propose_expenses():
 @pytest.mark.parametrize(
     ("body", "message"),
     [
-        ({"choices": [{"message": {"content": "not json"}}]}, "invalid structured"),
+        ({"choices": [{"message": {"content": "not json"}}]}, "malformed JSON"),
         ({"choices": [{"message": {"refusal": "no", "content": ""}}]}, "refused"),
         (_body(values=[]), "No supported facts"),
         (_body(values=[{"path": "not.a.fact", "value": 1, "ref": "page 1"}]), "unknown fact path"),
@@ -117,6 +120,28 @@ def test_rejects_unsafe_or_invalid_model_output(body, message):
     parser = _parser(lambda request: httpx.Response(200, json=body))
     with pytest.raises(DocumentInferenceError, match=message):
         parser.parse_bytes(b"image", "doc.png", "image/png")
+
+
+def test_accepts_fenced_or_parsed_structured_content():
+    raw = {"document_type": "w2", "values": [{
+        "path": "income.monthly_gross_income", "value": 5000, "ref": "Box 1 / 12"
+    }]}
+    fenced = {"choices": [{"message": {"content": f"```json\n{json.dumps(raw)}\n```"}}]}
+    parsed = {"choices": [{"message": {"content": None, "parsed": raw}}]}
+    for body in (fenced, parsed):
+        result = _parser(lambda request, body=body: httpx.Response(200, json=body)).parse_bytes(
+            b"image", "w2.png", "image/png"
+        )
+        assert result.document_type == "w2"
+
+
+def test_schema_error_names_location_without_echoing_value():
+    body = _body(values=[{"path": "identity.age", "value": "sensitive-invalid", "ref": "page 1"}])
+    parser = _parser(lambda request: httpx.Response(200, json=body))
+    with pytest.raises(DocumentInferenceError) as caught:
+        parser.parse_bytes(b"image", "doc.png", "image/png")
+    assert "Invalid value for identity.age" in str(caught.value)
+    assert "sensitive-invalid" not in str(caught.value)
 
 
 @pytest.mark.parametrize(
