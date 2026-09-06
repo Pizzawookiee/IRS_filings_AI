@@ -158,6 +158,31 @@ def test_accepts_fenced_or_parsed_structured_content():
         assert result.document_type == "w2"
 
 
+def test_recovers_missing_classification_from_unambiguous_filename():
+    body = _body("433a", [{
+        "path": "assets.cash_and_bank", "value": 250, "ref": "Section four"
+    }])
+    content = json.loads(body["choices"][0]["message"]["content"])
+    del content["document_type"]
+    body["choices"][0]["message"]["content"] = json.dumps(content)
+    result = _parser(lambda request: httpx.Response(200, json=body)).parse_bytes(
+        b"pdf", "form_433a_synthetic_mock_profile.pdf", "application/pdf"
+    )
+    assert result.document_type == "433a"
+    assert result.values["assets.cash_and_bank"]["source"] == "433a"
+
+
+def test_missing_classification_with_ambiguous_filename_is_rejected():
+    body = _body()
+    content = json.loads(body["choices"][0]["message"]["content"])
+    del content["document_type"]
+    body["choices"][0]["message"]["content"] = json.dumps(content)
+    with pytest.raises(DocumentInferenceError, match="document_type"):
+        _parser(lambda request: httpx.Response(200, json=body)).parse_bytes(
+            b"pdf", "upload.pdf", "application/pdf"
+        )
+
+
 def test_schema_error_names_location_without_echoing_value():
     body = _body(values=[{"path": "identity.age", "value": "sensitive-invalid", "ref": "page 1"}])
     parser = _parser(lambda request: httpx.Response(200, json=body))

@@ -235,7 +235,7 @@ class OpenRouterDocumentParser:
 
         if response.status_code >= 400:
             self._raise_api_error(response)
-        return self._parse_response(response)
+        return self._parse_response(response, filename=filename)
 
     @staticmethod
     def _is_parameter_routing_failure(response: httpx.Response) -> bool:
@@ -344,7 +344,21 @@ class OpenRouterDocumentParser:
             raise DocumentInferenceError("OpenRouter extraction must be a JSON object")
         return decoded
 
-    def _parse_response(self, response: httpx.Response) -> ProposedFacts:
+    @staticmethod
+    def _document_type_from_filename(filename: str) -> str | None:
+        normalized = re.sub(r"[^a-z0-9]", "", Path(filename).stem.lower())
+        markers = (
+            ("433a", "433a"),
+            ("433b", "433b"),
+            ("1099", "1099"),
+            ("w2", "w2"),
+            ("transcript", "transcript"),
+            ("notice", "notice"),
+        )
+        matches = {document_type for marker, document_type in markers if marker in normalized}
+        return matches.pop() if len(matches) == 1 else None
+
+    def _parse_response(self, response: httpx.Response, *, filename: str = "") -> ProposedFacts:
         try:
             body = response.json()
         except ValueError as exc:
@@ -363,6 +377,10 @@ class OpenRouterDocumentParser:
                 f"OpenRouter returned no extraction content (finish reason: {finish_reason})"
             )
         raw = self._decode_json_content(content)
+        if "document_type" not in raw:
+            inferred_type = self._document_type_from_filename(filename)
+            if inferred_type:
+                raw = {**raw, "document_type": inferred_type}
         try:
             extraction = ExtractionEnvelope.model_validate(raw)
         except ValidationError as exc:
