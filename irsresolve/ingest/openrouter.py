@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = "anthropic/claude-sonnet-5"
 DEFAULT_TIMEOUT_SECONDS = 60.0
+DEFAULT_PDF_ENGINE = "mistral-ocr"
+SUPPORTED_PDF_ENGINES = {"mistral-ocr", "cloudflare-ai", "native"}
 MAX_FILE_BYTES = 20 * 1024 * 1024
 SUPPORTED_MEDIA_TYPES = {
     "application/pdf",
@@ -102,7 +104,26 @@ to monthly amounts by dividing by 12 and name the source box in ref. A 1099 is g
 never populate any expenses.* path. For every value provide a concise page, box, line, or section
 reference. Collection-valued paths such as debt.tax_periods must be returned once with the complete
 list, never as duplicate paths. If the document contains no supported values, return an empty values
-array."""
+array.
+
+For Form 433-A and Form 433-B, actively map completed form fields as follows:
+- taxpayer/dependent count -> household.household_size
+- taxpayer address ZIP and state -> household.zip_code and household.state
+- total monthly household income -> income.monthly_gross_income
+- itemized monthly income -> income.income_sources
+- housing/utilities -> expenses.housing_utilities
+- food, clothing, housekeeping supplies, personal care, and miscellaneous -> expenses.food_clothing_misc
+- vehicle loan/lease payments -> expenses.transportation_ownership
+- vehicle operating and public transportation -> expenses.transportation_operating
+- out-of-pocket medical costs -> expenses.healthcare_out_of_pocket
+- current taxes withheld or estimated tax payments -> expenses.taxes_withheld_or_estimated
+- health insurance, childcare, court-ordered payments, secured debts, and other necessary costs ->
+  their matching expenses.* paths
+- cash and bank balances -> assets.cash_and_bank
+- investments, retirement, life-insurance cash value, real estate, vehicles, business assets, and
+  other assets -> their matching assets.* paths
+Use monthly amounts where the form labels them monthly. Do not confuse an asset balance with a
+monthly payment. Extract an explicit zero; do not treat a blank field as zero."""
 
 
 def _response_schema() -> dict[str, Any]:
@@ -141,10 +162,16 @@ class OpenRouterDocumentParser:
         api_key: str | None = None,
         model: str | None = None,
         timeout_seconds: float | None = None,
+        pdf_engine: str | None = None,
         client: httpx.Client | None = None,
     ) -> None:
         self.api_key = api_key if api_key is not None else os.getenv("OPENROUTER_API_KEY")
         self.model = model or os.getenv("OPENROUTER_MODEL", DEFAULT_MODEL)
+        self.pdf_engine = (pdf_engine or os.getenv("OPENROUTER_PDF_ENGINE", DEFAULT_PDF_ENGINE)).lower().strip()
+        if self.pdf_engine not in SUPPORTED_PDF_ENGINES:
+            raise DocumentInferenceError(
+                "OPENROUTER_PDF_ENGINE must be mistral-ocr, cloudflare-ai, or native"
+            )
         self.timeout_seconds = self._timeout_from_env() if timeout_seconds is None else timeout_seconds
         if self.timeout_seconds <= 0:
             raise DocumentInferenceError("timeout_seconds must be greater than zero")
@@ -261,7 +288,7 @@ class OpenRouterDocumentParser:
         }
         payload["plugins"] = [{"id": "response-healing"}]
         if media_type == "application/pdf":
-            payload["plugins"].insert(0, {"id": "file-parser", "pdf": {"engine": "cloudflare-ai"}})
+            payload["plugins"].insert(0, {"id": "file-parser", "pdf": {"engine": self.pdf_engine}})
         return payload
 
     @staticmethod

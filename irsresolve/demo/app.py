@@ -359,6 +359,17 @@ def _rebuild_proposals() -> None:
     st.session_state.proposed = rebuilt
 
 
+def _suggest_document_type(filename: str, required_type: str) -> str:
+    normalized = filename.lower().replace("-", "").replace("_", "")
+    for marker, document_type in (
+        ("433a", "433a"), ("433b", "433b"), ("1099", "1099"), ("w2", "w2"),
+        ("transcript", "transcript"), ("notice", "notice"),
+    ):
+        if marker in normalized:
+            return document_type
+    return required_type
+
+
 def _render_document_review(draft: QuestionnaireDraft) -> None:
     st.subheader("Review and confirm")
     st.caption("Nothing extracted by the model is used until you confirm it here.")
@@ -504,7 +515,13 @@ def page_documents():
                 st.error(f"{upload.name}: extraction failed — {e}")
                 st.session_state.documents = [
                     record for record in st.session_state.documents if record["filename"] != upload.name
-                ] + [{"filename": upload.name, "status": "failed", "error": str(e)}]
+                ] + [{
+                    "filename": upload.name,
+                    "status": "failed",
+                    "error": str(e),
+                    "confirmed_type": _suggest_document_type(upload.name, required_type),
+                    "manual_confirmed": False,
+                }]
 
     if st.session_state.documents:
         st.subheader("Uploaded files")
@@ -527,11 +544,26 @@ def page_documents():
                     st.caption(f"{record['count']} proposed values")
                 elif record.get("error"):
                     st.caption(record["error"])
+                    selected = st.selectbox(
+                        "Document type", type_options,
+                        index=type_options.index(record.get("confirmed_type", required_type)),
+                        key=f"failed_document_type_{index}",
+                    )
+                    record["confirmed_type"] = selected
+                    record["manual_confirmed"] = st.checkbox(
+                        "The file is this document type; continue with manual financial entry",
+                        value=record.get("manual_confirmed", False),
+                        key=f"manual_document_{index}",
+                    )
         if proposals_changed:
             _rebuild_proposals()
 
     required_ready = any(
-        record.get("status") == "ready" and record.get("confirmed_type") == required_type
+        record.get("confirmed_type") == required_type
+        and (
+            record.get("status") == "ready"
+            or (record.get("status") == "failed" and record.get("manual_confirmed"))
+        )
         for record in st.session_state.documents
     )
     if not required_ready:

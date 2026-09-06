@@ -35,6 +35,7 @@ def _body(document_type="w2", values=None):
 def _parser(handler):
     return OpenRouterDocumentParser(
         api_key="test-key",
+        pdf_engine="mistral-ocr",
         client=httpx.Client(transport=httpx.MockTransport(handler)),
     )
 
@@ -66,7 +67,8 @@ def test_request_construction_for_supported_media(media_type, expected_type):
     assert ("file-parser" in plugin_ids) is (media_type == "application/pdf")
     if media_type == "application/pdf":
         file_parser = next(plugin for plugin in seen["plugins"] if plugin["id"] == "file-parser")
-        assert file_parser["pdf"]["engine"] == "cloudflare-ai"
+        assert file_parser["pdf"]["engine"] == "mistral-ocr"
+        assert "household.household_size" in seen["messages"][0]["content"]
     assert result.document_type == "w2"
 
 
@@ -222,3 +224,21 @@ def test_streamlit_documents_renders_real_uploader_after_questions():
     assert not app.exception
     assert len(app.get("file_uploader")) == 1
     assert any(button.label == "Extract proposed values" for button in app.button)
+
+
+def test_streamlit_failed_required_extraction_can_continue_manually():
+    from streamlit.testing.v1 import AppTest
+
+    app_path = Path(__file__).parents[1] / "irsresolve" / "demo" / "app.py"
+    app = AppTest.from_file(app_path).run(timeout=20)
+    app.session_state["questions_complete"] = True
+    app.session_state["documents"] = [{
+        "filename": "form_433a.pdf",
+        "status": "failed",
+        "error": "No supported facts were found",
+        "confirmed_type": "433a",
+        "manual_confirmed": True,
+    }]
+    app.sidebar.radio[0].set_value("Documents").run(timeout=20)
+    assert not app.exception
+    assert any(getattr(item, "value", "") == "Review and confirm" for item in app.subheader)

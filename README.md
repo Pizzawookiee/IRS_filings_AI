@@ -203,14 +203,21 @@ $env:OPENROUTER_API_KEY = "your-rotated-key"
 # Optional defaults shown below
 $env:OPENROUTER_MODEL = "anthropic/claude-sonnet-5"
 $env:OPENROUTER_TIMEOUT_SECONDS = "60"
+$env:OPENROUTER_PDF_ENGINE = "mistral-ocr" # cloudflare-ai and native are also supported
 ```
 
 Uploads are encoded in memory and transmitted to OpenRouter and its selected inference provider.
 After confirmation, the confirmed facts and deterministic screening result are sent again for the
 personalized explanation. The application does not persist the file. Model and PDF-processing
-charges apply according to OpenRouter's current pricing. Extraction only proposes data, and Sonnet
+charges apply according to OpenRouter's current pricing. The default Mistral OCR parser adds a
+small per-page charge and is used because completed tax forms are frequently scanned or
+image-heavy. Extraction only proposes data, and Sonnet
 cannot determine eligibility. Missing credentials, timeouts, and provider errors leave the
 deterministic analysis and offline examples available.
+
+If a required Form 433 upload cannot be read, the Documents page lets the taxpayer confirm the
+document type and enter the required financial values manually. Those entries carry user
+provenance and still require explicit confirmation.
 
 Supported classifications are W-2, 1099, Form 433-A, Form 433-B, IRS notice, and account transcript.
 Unknown fact paths and invalid values are rejected after inference against the canonical Pydantic
