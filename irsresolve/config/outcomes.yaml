@@ -1,0 +1,118 @@
+# Outcome display metadata — names/forms/next-steps live here, never in rules (config-not-code).
+SHORT_TERM_PLAN:
+  display_name: "Short-Term Payment Plan"
+  forms: ["Online Payment Agreement"]
+  what_happens_next: "Pay the balance within 180 days through the Online Payment Agreement or by phone. Interest and the failure-to-pay penalty continue until paid."
+GUARANTEED_IA:
+  display_name: "Guaranteed Installment Agreement"
+  forms: ["9465", "Online Payment Agreement"]
+  what_happens_next: "Apply online or on Form 9465. The IRS must accept; stay compliant and pay in full within 3 years."
+SIMPLE_PAYMENT_PLAN:
+  display_name: "Simple Payment Plan"
+  forms: ["Online Payment Agreement", "9465"]
+  what_happens_next: "Set up the plan online (individuals) or by mail on Form 9465. No financial statement is required. Direct debit is typically required above $25,000."
+NON_STREAMLINED_IA:
+  display_name: "Non-Streamlined Installment Agreement"
+  forms: ["9465", "433-F", "433-A"]
+  what_happens_next: "Submit a financial statement. The IRS sets the payment at your disposable income and will likely file a lien."
+PPIA_CANDIDATE:
+  display_name: "Partial Payment Installment Agreement"
+  forms: ["9465", "433-A"]
+  what_happens_next: "The IRS reviews your financials, will likely file a lien, and re-evaluates your ability to pay every two years. The remaining balance expires at the collection statute date."
+  referral_reason: "The IRS weighs a partial-payment plan against selling assets or extending the collection deadline. This is a judgment call an enrolled agent or tax attorney should review before you apply."
+CNC:
+  display_name: "Currently Not Collectible"
+  forms: ["433-F", "433-A"]
+  what_happens_next: "The IRS suspends active collection. Interest and penalties keep accruing and the statute keeps running; the IRS rechecks your income each year."
+OIC_DATC_CANDIDATE:
+  display_name: "Offer in Compromise (Doubt as to Collectibility)"
+  forms: ["656", "433-A (OIC)"]
+  what_happens_next: "Submit an offer at or above your reasonable collection potential. Acceptance closes the case; you must stay compliant for 5 years."
+OIC_ETA_CANDIDATE:
+  display_name: "Offer in Compromise (Effective Tax Administration)"
+  forms: ["656", "433-A (OIC)"]
+  what_happens_next: "An ETA offer requires a documented hardship narrative. Acceptance rates are low; professional help is recommended."
+OIC_DATL_CANDIDATE:
+  display_name: "Offer in Compromise (Doubt as to Liability)"
+  forms: ["656-L"]
+  what_happens_next: "Dispute the amount assessed. Financials are irrelevant; this is a legal determination best handled with representation."
+BLOCKER_COMPLIANCE:
+  display_name: "Not eligible yet — compliance required"
+  forms: []
+  what_happens_next: "File all required returns and bring current-period estimated taxes or federal tax deposits current, then re-run. Business trust-fund balances over $25,000 will need full financial disclosure and carry Trust Fund Recovery Penalty exposure — consult a professional."
+BLOCKER_BANKRUPTCY:
+  display_name: "Not eligible — open bankruptcy"
+  forms: []
+  what_happens_next: "The automatic stay prevents the IRS from entering agreements. Some tax debt may be dischargeable — consult a bankruptcy attorney."
+NEEDS_FINANCIAL_DISCLOSURE:
+  display_name: "More information needed"
+  forms: []
+  what_happens_next: "Answer the household, income, expense, and asset questions so the engine can compute your capacity to pay."
+FTA_ELIGIBLE:
+  display_name: "First Time Penalty Abatement"
+  forms: ["843 or phone request"]
+  what_happens_next: "Request the waiver by phone or on Form 843. It removes eligible penalties for one period with a clean 3-year history."
+REASONABLE_CAUSE_CANDIDATE:
+  display_name: "Reasonable-Cause Penalty Relief"
+  forms: ["843"]
+  what_happens_next: "Submit a written statement documenting the cause on Form 843."
+STATUTORY_PENALTY_RELIEF:
+  display_name: "Statutory / Administrative Penalty Relief"
+  forms: []
+  what_happens_next: "Disaster or combat-zone relief may apply automatically or by IRS notice."
+INNOCENT_SPOUSE_CANDIDATE:
+  display_name: "Innocent Spouse Relief"
+  forms: ["8857"]
+  what_happens_next: "File Form 8857. This is a legal determination and the IRS must contact the other spouse; representation is recommended."
+INJURED_SPOUSE_8379:
+  display_name: "Injured Spouse Allocation"
+  forms: ["8379"]
+  what_happens_next: "File Form 8379 to recover your share of a refund offset to your spouse's separate debt."
+URGENT_LEVY_RELEASE:
+  display_name: "Levy Release"
+  forms: ["433-F"]
+  what_happens_next: "Contact the IRS to request a hardship release. Entering an installment agreement also stops the levy."
+CDP_WINDOW_OPEN:
+  display_name: "Collection Due Process Hearing"
+  forms: ["12153"]
+  what_happens_next: "File Form 12153 before the deadline to preserve Tax Court review and suspend the levy."
+EQUIVALENT_HEARING_OPEN:
+  display_name: "Equivalent Hearing"
+  forms: ["12153"]
+  what_happens_next: "The 30-day CDP window has passed; you may request an equivalent hearing within one year (no Tax Court review)."
+LIEN_WITHDRAWAL_ELIGIBLE:
+  display_name: "Lien Withdrawal"
+  forms: ["12277"]
+  what_happens_next: "A direct-debit installment agreement under $25,000 can qualify for lien withdrawal on Form 12277."
+PASSPORT_REVERSAL_ON_RESOLUTION:
+  display_name: "Passport Certification Reversal"
+  forms: []
+  what_happens_next: "Certification reverses within 30 days of entering an installment agreement, OIC, or CNC-hardship status."
+BANKRUPTCY_DISCHARGE_POSSIBLE:
+  display_name: "Possible Bankruptcy Discharge"
+  forms: []
+  what_happens_next: "Some periods may meet the bankruptcy timing tests. This is a court process — consult a bankruptcy attorney."
+CSED_IMMINENT:
+  display_name: "Collection Statute Nearing Expiration"
+  forms: []
+  what_happens_next: "With under 24 months to the statute date, CNC or a partial-payment plan may effectively resolve the debt without an offer."
+OIC_FEE_WAIVER:
+  display_name: "OIC Fee Waiver (Low Income)"
+  forms: []
+  what_happens_next: "Your income qualifies you to waive the OIC application fee and initial payment."
+LITC_REFERRAL:
+  display_name: "Low Income Taxpayer Clinic"
+  forms: []
+  what_happens_next: "A Low Income Taxpayer Clinic can represent you for free."
+TAS_REFERRAL:
+  display_name: "Taxpayer Advocate Service"
+  forms: ["911"]
+  what_happens_next: "The Taxpayer Advocate Service can help when enforcement causes hardship and the IRS is unresponsive."
+AUDIT_RECONSIDERATION_CANDIDATE:
+  display_name: "Audit Reconsideration"
+  forms: []
+  what_happens_next: "Submit a written request with new information to reconsider an audit assessment."
+SFR_REPLACEMENT_RECOMMENDED:
+  display_name: "Substitute-for-Return Replacement"
+  forms: []
+  what_happens_next: "Filing your actual return replaces the IRS substitute and usually lowers the assessment."

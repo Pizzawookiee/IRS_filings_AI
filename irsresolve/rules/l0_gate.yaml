@@ -1,0 +1,72 @@
+# Layer 0 — segment & gate (architecture §5 / §6 L0_gate_rule, L0_dispute_rule).
+# L0_gate: first-match; a BLOCKER_* outcome stops ordinary progression (levy relief still runs).
+# L0_dispute: all-match informational flags.
+
+- id: L0.blocker.bankruptcy
+  layer: L0_gate
+  when: f.compliance.bankruptcy_status in ["open_ch7", "open_ch13"]
+  outcome: BLOCKER_BANKRUPTCY
+  flags: [BANKRUPTCY_DISCHARGE_POSSIBLE]
+  referral: true
+  reason: >
+    You are in an open bankruptcy, so the automatic stay prevents the IRS from entering any
+    resolution agreement. Some of this debt may be dischargeable — that is a court process a
+    bankruptcy attorney must review.
+  citations: [compliance_gate, bankruptcy]
+  uses: [compliance.bankruptcy_status]
+
+- id: L0.blocker.returns
+  layer: L0_gate
+  when: f.compliance.returns_filed_all == False
+  outcome: BLOCKER_COMPLIANCE
+  reason: >
+    All required tax returns must be filed before any resolution program is available. File your
+    missing returns, then run this again.
+  citations: [compliance_gate]
+  uses: [compliance.returns_filed_all]
+
+- id: L0.blocker.business_current
+  layer: L0_gate
+  when: >
+    f.identity.taxpayer_type != "individual"
+    and (f.compliance.current_year_estimated_paid == False or f.compliance.ftd_current == False)
+  outcome: BLOCKER_COMPLIANCE
+  reason: >
+    As a business or self-employed taxpayer, your current-period estimated taxes and federal tax
+    deposits must be current before the IRS will negotiate older balances. Bring them current, then
+    run this again.
+  citations: [compliance_gate]
+  uses: [identity.taxpayer_type, compliance.current_year_estimated_paid, compliance.ftd_current]
+
+- id: L0.dispute.datl
+  layer: L0_dispute
+  when: f.debt.liability_disputed and f.debt.prior_appeal_or_court == False
+  flags: [OIC_DATL_CANDIDATE]
+  referral: true
+  reason: >
+    You believe the assessed amount is wrong and have not previously contested it in Appeals or
+    Tax Court, so a Doubt as to Liability offer (Form 656-L) may apply. This is a legal argument
+    best handled with representation.
+  citations: [oic_grounds]
+  uses: [debt.liability_disputed, debt.prior_appeal_or_court]
+
+- id: L0.dispute.audit_recon
+  layer: L0_dispute
+  when: f.debt.liability_disputed and any_period(f.debt.tax_periods, "assessed_via_audit")
+  flags: [AUDIT_RECONSIDERATION_CANDIDATE]
+  referral: true
+  reason: >
+    Because part of your balance came from an audit you disagree with, audit reconsideration may
+    lower it if you have information the audit did not consider.
+  citations: [oic_grounds]
+  uses: [debt.liability_disputed, debt.tax_periods]
+
+- id: L0.dispute.sfr
+  layer: L0_dispute
+  when: any_period(f.debt.tax_periods, "assessed_via_sfr")
+  flags: [SFR_REPLACEMENT_RECOMMENDED]
+  reason: >
+    The IRS filed a substitute return for one or more years. Filing your own return for those years
+    usually lowers the assessment because the substitute omits your deductions and credits.
+  citations: [oic_grounds]
+  uses: [debt.tax_periods]

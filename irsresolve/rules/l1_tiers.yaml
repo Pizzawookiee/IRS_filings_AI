@@ -1,0 +1,99 @@
+# Layer 1 — low-disclosure tiers (architecture §6 L1_tier_rule). First-match; order encodes the
+# §9 conflict rule (Guaranteed IA precedes Simple Plan, so the stronger statutory right wins ties).
+# `next: stop` terminates before Layer 2 — no financial disclosure needed.
+
+- id: L1.short_term
+  layer: L1
+  when: f.quick_capacity.can_full_pay_180_days == True
+  outcome: SHORT_TERM_PLAN
+  next: stop
+  reason: >
+    You can pay the full balance within 180 days, so a short-term payment plan is the cheapest
+    route — no setup fee, and interest and the failure-to-pay penalty stop once the balance is paid.
+  reason_if_excluded: >
+    You indicated you cannot pay the full balance within 180 days.
+  citations: [short_term_plan]
+  uses: [quick_capacity.can_full_pay_180_days]
+
+- id: L1.guaranteed_ia
+  layer: L1
+  when: >
+    f.identity.taxpayer_type == "individual"
+    and d.tax_only_balance <= cfg.guaranteed_ia.max_tax_balance
+    and f.quick_capacity.prior_5yr_compliance
+    and not f.quick_capacity.prior_ia_in_5yrs
+    and (d.total_debt / f.quick_capacity.proposed_monthly_payment) <= cfg.guaranteed_ia.max_term_months
+  outcome: GUARANTEED_IA
+  next: stop
+  reason: >
+    Your tax-only balance of ${d.tax_only_balance:,.0f} is at or under the
+    ${cfg.guaranteed_ia.max_tax_balance:,.0f} statutory limit and you have a clean 5-year history,
+    so the IRS must grant an installment agreement under IRC 6159(c).
+  reason_if_excluded: >
+    A Guaranteed Installment Agreement requires an individual taxpayer, a tax-only balance at or
+    under ${cfg.guaranteed_ia.max_tax_balance:,.0f}, a clean prior-5-year record with no earlier
+    installment agreement, and full payoff within {cfg.guaranteed_ia.max_term_months} months.
+  citations: [guaranteed_ia]
+  uses: [identity.taxpayer_type, tax_only_balance, quick_capacity.prior_5yr_compliance, quick_capacity.prior_ia_in_5yrs, total_debt, quick_capacity.proposed_monthly_payment]
+
+- id: L1.simple_plan.individual
+  layer: L1
+  when: >
+    f.identity.taxpayer_type != "business"
+    and d.total_debt <= cfg.simple_plan.individual.max_balance
+    and (d.total_debt / f.quick_capacity.proposed_monthly_payment) <= min(cfg.simple_plan.max_term_months, d.csed_months_remaining)
+  outcome: SIMPLE_PAYMENT_PLAN
+  variant: individual
+  next: stop
+  reason: >
+    Your balance of ${d.total_debt:,.0f} is at or under the
+    ${cfg.simple_plan.individual.max_balance:,.0f} threshold, and
+    ${f.quick_capacity.proposed_monthly_payment:,.0f}/month pays it off in about
+    {d.total_debt / f.quick_capacity.proposed_monthly_payment:.0f} months, within the collection
+    statute. No financial statement is required.
+  reason_if_excluded: >
+    A Simple Payment Plan requires a balance at or under
+    ${cfg.simple_plan.individual.max_balance:,.0f} that your proposed payment clears before the
+    collection statute expires.
+  citations: [simple_plan]
+  uses: [identity.taxpayer_type, total_debt, quick_capacity.proposed_monthly_payment, csed_months_remaining]
+
+- id: L1.simple_plan.business_trust_fund
+  layer: L1
+  when: >
+    f.identity.taxpayer_type == "business"
+    and d.includes_trust_fund_tax
+    and d.total_debt <= cfg.simple_plan.business_trust_fund.max_balance
+    and (d.total_debt / f.quick_capacity.proposed_monthly_payment) <= min(cfg.simple_plan.max_term_months, d.csed_months_remaining)
+  outcome: SIMPLE_PAYMENT_PLAN
+  variant: business_trust_fund
+  next: stop
+  reason: >
+    Your business balance of ${d.total_debt:,.0f} includes trust-fund tax and is at or under the
+    ${cfg.simple_plan.business_trust_fund.max_balance:,.0f} threshold, so a Simple Payment Plan
+    applies with no financial statement.
+  reason_if_excluded: >
+    A business trust-fund Simple Payment Plan requires a balance at or under
+    ${cfg.simple_plan.business_trust_fund.max_balance:,.0f} paid off before the collection statute.
+  citations: [simple_plan]
+  uses: [identity.taxpayer_type, includes_trust_fund_tax, total_debt, quick_capacity.proposed_monthly_payment, csed_months_remaining]
+
+- id: L1.simple_plan.business
+  layer: L1
+  when: >
+    f.identity.taxpayer_type == "business"
+    and not d.includes_trust_fund_tax
+    and d.total_debt <= cfg.simple_plan.business.max_balance
+    and (d.total_debt / f.quick_capacity.proposed_monthly_payment) <= min(cfg.simple_plan.max_term_months, d.csed_months_remaining)
+  outcome: SIMPLE_PAYMENT_PLAN
+  variant: business
+  next: stop
+  reason: >
+    Your business balance of ${d.total_debt:,.0f} is at or under the
+    ${cfg.simple_plan.business.max_balance:,.0f} threshold, so a Simple Payment Plan applies with
+    no financial statement.
+  reason_if_excluded: >
+    A business Simple Payment Plan requires a balance at or under
+    ${cfg.simple_plan.business.max_balance:,.0f} paid off before the collection statute.
+  citations: [simple_plan]
+  uses: [identity.taxpayer_type, includes_trust_fund_tax, total_debt, quick_capacity.proposed_monthly_payment, csed_months_remaining]

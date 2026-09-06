@@ -1,0 +1,12 @@
+state,county,household_size,amount
+MA,suffolk,1,2400
+MA,suffolk,2,2800
+MA,suffolk,3,3000
+MA,suffolk,4,3300
+MA,middlesex,2,2600
+MA,middlesex,3,3100
+MA,worcester,1,1600
+MA,worcester,2,1800
+MA,worcester,3,2200
+MA,norfolk,2,1850
+MA,norfolk,3,2400

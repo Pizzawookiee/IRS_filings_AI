@@ -1,0 +1,31 @@
+{
+  "as_of": "2026-09-06",
+  "facts": {
+    "identity": {"taxpayer_type": "individual", "age": 45},
+    "debt": {
+      "tax_periods": [
+        {"year": 2021, "tax_type": "income_1040", "tax": 58000, "penalty": 7100, "interest": 3300,
+         "return_filed_date": "2022-11-06", "return_due_date": "2022-04-15", "filed_jointly": false}
+      ],
+      "liability_disputed": false
+    },
+    "compliance": {"returns_filed_all": true, "bankruptcy_status": "none"},
+    "quick_capacity": {"can_full_pay_180_days": false, "proposed_monthly_payment": 410,
+                       "prior_5yr_compliance": false, "prior_ia_in_5yrs": false},
+    "household": {"household_size": 2, "zip_code": "02026", "state": "MA"},
+    "income": {"monthly_gross_income": 4900,
+               "income_sources": [{"type": "wages", "amount": 4900, "source_name": "Acme Corp"}]},
+    "expenses": {"housing_utilities": 1850, "food_clothing_misc": 0, "transportation_ownership": 400,
+                 "transportation_operating": 300, "healthcare_out_of_pocket": 0,
+                 "taxes_withheld_or_estimated": 320},
+    "assets": {"cash_and_bank": 1400, "retirement_accounts": 4000,
+               "vehicles": [{"fmv": 5000, "loan_balance": 6000, "is_necessary": true}]},
+    "enforcement": {"enforcement_flags": ["none"],
+                    "notices_received": [{"type": "L1058", "date": "2026-08-18"}]},
+    "circumstances": {"prior_3yr_penalty_history": false, "penalty_reason_category": "none",
+                      "combat_zone": false, "disaster_zone_resident": false,
+                      "hardship_circumstances": ["none"], "spouse_issues": ["none"]}
+  },
+  "_expected": {"primary": "PPIA_CANDIDATE", "alternatives": ["OIC_DATC_CANDIDATE"],
+                "flags": ["FTA_ELIGIBLE"], "urgent": ["CDP_WINDOW_OPEN"]}
+}

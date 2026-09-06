@@ -1,0 +1,129 @@
+# Layer 2 — full financial disclosure & capacity (architecture §6 L2_primary_rule, L2_secondary_rule).
+# L2_primary: first-match → the primary collection path. L2_secondary: all-match → alternatives/flags.
+
+# ---- L2_primary (first match) ----
+
+- id: L2.cnc
+  layer: L2_primary
+  when: d.disposable_income <= 0 and d.nre_total < d.total_debt
+  outcome: CNC
+  reason: >
+    After IRS-allowed living expenses, your income leaves ${d.disposable_income:,.0f}/month, so you
+    have no ability to pay, and your ${d.nre_total:,.0f} in asset equity would not satisfy the
+    ${d.total_debt:,.0f} balance. The IRS can place your account in Currently Not Collectible status.
+  reason_if_excluded: >
+    Currently Not Collectible requires no disposable income after allowable expenses; yours is
+    ${d.disposable_income:,.0f}/month.
+  citations: [cnc]
+  uses: [disposable_income, nre_total, total_debt]
+
+- id: L2.non_streamlined
+  layer: L2_primary
+  when: d.disposable_income > 0 and d.full_pay_capacity >= d.total_debt
+  outcome: NON_STREAMLINED_IA
+  extras:
+    monthly_payment: d.disposable_income
+  reason: >
+    Your ${d.disposable_income:,.0f}/month of disposable income over the {d.csed_months_remaining}
+    months left on the collection statute, plus ${d.nre_total:,.0f} in equity, covers the
+    ${d.total_debt:,.0f} balance, so a full-pay installment agreement applies.
+  reason_if_excluded: >
+    A full-pay installment agreement requires your income and equity to cover the balance before the
+    collection statute expires; your capacity is ${d.full_pay_capacity:,.0f} against ${d.total_debt:,.0f}.
+  citations: [non_streamlined_ia]
+  uses: [disposable_income, full_pay_capacity, total_debt, csed_months_remaining, nre_total]
+
+- id: L2.ppia
+  layer: L2_primary
+  when: d.disposable_income > 0 and d.full_pay_capacity < d.total_debt and d.nre_total < cfg.ppia.equity_materiality_threshold
+  outcome: PPIA_CANDIDATE
+  referral: true
+  extras:
+    monthly_payment: d.disposable_income
+  reason: >
+    Your disposable income of ${d.disposable_income:,.0f}/month over the {d.csed_months_remaining}
+    months remaining on the collection statute, plus ${d.nre_total:,.0f} in equity, totals
+    ${d.full_pay_capacity:,.0f} — below your ${d.total_debt:,.0f} balance — and you have no
+    accessible equity to bridge the gap, which points to a Partial Payment Installment Agreement.
+  reason_if_excluded: >
+    A Partial Payment Installment Agreement applies when you can pay something monthly but not the
+    full balance by the statute date and have little accessible equity.
+  citations: [ppia]
+  uses: [disposable_income, full_pay_capacity, total_debt, nre_total, csed_months_remaining]
+
+- id: L2.oic_datc_primary
+  layer: L2_primary
+  when: d.disposable_income > 0 and d.full_pay_capacity < d.total_debt and d.nre_total >= cfg.ppia.equity_materiality_threshold
+  outcome: OIC_DATC_CANDIDATE
+  extras:
+    offer_floor_lump: d.rcp_lump_sum
+    offer_floor_periodic: d.rcp_periodic
+  reason: >
+    You cannot full-pay the ${d.total_debt:,.0f} balance by the statute date, and you hold
+    ${d.nre_total:,.0f} in equity the IRS will expect applied, so an Offer in Compromise is the
+    structured path — the offer floor is your reasonable collection potential.
+  reason_if_excluded: >
+    A collectibility offer as the primary path applies when you cannot full-pay and hold material
+    equity the IRS expects you to contribute.
+  citations: [oic_grounds, oic_rcp]
+  uses: [disposable_income, full_pay_capacity, total_debt, nre_total, rcp_lump_sum, rcp_periodic]
+
+- id: L2.else_cnc
+  layer: L2_primary
+  when: "True"
+  outcome: CNC
+  referral: true
+  reason: >
+    Your financial profile does not fit the standard capacity tiers, so a professional should review
+    it; Currently Not Collectible is the safe default while that review happens.
+  reason_if_excluded: >
+    This is the fallback path used only when no standard capacity tier applies.
+  citations: [cnc]
+  uses: [disposable_income, nre_total, total_debt]
+
+# ---- L2_secondary (all match) ----
+
+- id: L2.sec.oic_datc
+  layer: L2_secondary
+  when: d.rcp_min < d.total_debt and f.compliance.bankruptcy_status not in ["open_ch7", "open_ch13"]
+  outcome: OIC_DATC_CANDIDATE
+  extras:
+    offer_floor_lump: d.rcp_lump_sum
+    offer_floor_periodic: d.rcp_periodic
+  reason: >
+    Your reasonable collection potential (${d.rcp_lump_sum:,.0f} lump sum / ${d.rcp_periodic:,.0f}
+    periodic) is below your ${d.total_debt:,.0f} balance. An offer at or above that amount meets the
+    IRS acceptance standard and closes the case.
+  citations: [oic_grounds, oic_rcp]
+  uses: [rcp_min, rcp_lump_sum, rcp_periodic, total_debt, compliance.bankruptcy_status]
+
+- id: L2.sec.oic_eta
+  layer: L2_secondary
+  when: d.rcp_min >= d.total_debt and f.identity.taxpayer_type != "business" and intersects(f.circumstances.hardship_circumstances, ["serious_illness", "disability", "elderly", "dependent_special_needs", "natural_disaster", "death_in_family", "unemployment"])
+  outcome: OIC_ETA_CANDIDATE
+  referral: true
+  reason: >
+    You could pay the balance in full, but a documented hardship may support an Effective Tax
+    Administration offer, where collecting in full would be inequitable.
+  citations: [oic_eta]
+  uses: [rcp_min, total_debt, identity.taxpayer_type, circumstances.hardship_circumstances]
+
+- id: L2.sec.low_income
+  layer: L2_secondary
+  when: d.low_income_certified
+  flags: [OIC_FEE_WAIVER, LITC_REFERRAL]
+  reason: >
+    Your household income is at or below 250% of the federal poverty guideline, which waives the
+    Offer in Compromise application fee and initial payment and qualifies you for free clinic help.
+  citations: [oic_low_income, litc]
+  uses: [low_income_certified]
+
+- id: L2.sec.csed_imminent
+  layer: L2_secondary
+  when: d.csed_imminent
+  flags: [CSED_IMMINENT]
+  reason: >
+    With under 24 months left on the collection statute, Currently Not Collectible or a
+    partial-payment plan may effectively resolve the debt before an offer would even be decided.
+  citations: [csed]
+  uses: [csed_imminent]

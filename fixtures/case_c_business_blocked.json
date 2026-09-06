@@ -1,0 +1,23 @@
+{
+  "as_of": "2026-09-06",
+  "facts": {
+    "identity": {"taxpayer_type": "business", "business_entity_type": "s_corp", "has_employees": true, "age": 50},
+    "debt": {
+      "tax_periods": [
+        {"year": 2024, "tax_type": "payroll_941", "tax": 31000, "penalty": 0, "interest": 0,
+         "assessment_date": "2024-06-01", "return_filed_date": "2024-07-31", "return_due_date": "2024-07-31",
+         "filed_jointly": false}
+      ],
+      "liability_disputed": false
+    },
+    "compliance": {"returns_filed_all": true, "current_year_estimated_paid": true, "ftd_current": false,
+                   "bankruptcy_status": "none"},
+    "quick_capacity": {"can_full_pay_180_days": false, "proposed_monthly_payment": 500,
+                       "prior_5yr_compliance": false, "prior_ia_in_5yrs": false},
+    "enforcement": {"enforcement_flags": ["none"]},
+    "circumstances": {"prior_3yr_penalty_history": true, "penalty_reason_category": "none",
+                      "combat_zone": false, "disaster_zone_resident": false,
+                      "hardship_circumstances": ["none"], "spouse_issues": ["none"]}
+  },
+  "_expected": {"primary": "BLOCKER_COMPLIANCE", "alternatives": [], "flags": [], "urgent": []}
+}

@@ -1,0 +1,152 @@
+# Canonical citation map — architecture §8.2 (all 25 rows). Keyed by citation key; rules
+# reference these keys. URLs live here only (config-not-code); re-verify on §10 cadence.
+compliance_gate:
+  source: "IRS Topic No. 202, Tax Payment Options"
+  url: "https://www.irs.gov/taxtopics/tc202"
+  authority: irs_gov
+  excerpt_paraphrase: "All required returns must be filed and an open bankruptcy excludes payment agreements."
+  retrieved: "2026-09-01"
+short_term_plan:
+  source: "Payment plans / Online Payment Agreement"
+  url: "https://www.irs.gov/payments/online-payment-agreement-application"
+  authority: irs_gov
+  excerpt_paraphrase: "Short-term payment plan pays the balance within 180 days with no setup fee."
+  retrieved: "2026-09-01"
+guaranteed_ia:
+  source: "IRC §6159(c); IRM 5.14.5"
+  url: "https://www.irs.gov/irm/part5/irm_05-014-005"
+  authority: irm
+  excerpt_paraphrase: "Statutory installment agreement for tax owed of $10,000 or less; the IRS must accept."
+  retrieved: "2026-09-01"
+simple_plan:
+  source: "IRS Topic No. 202; Payment plans page"
+  url: "https://www.irs.gov/taxtopics/tc202"
+  authority: irs_gov
+  excerpt_paraphrase: "Simple Payment Plan available when assessed balance is $50,000 or less; no financial statement."
+  retrieved: "2026-09-01"
+non_streamlined_ia:
+  source: "IRM 5.14.1"
+  url: "https://www.irs.gov/irm/part5/irm_05-014-001"
+  authority: irm
+  excerpt_paraphrase: "Installment agreement above streamlined thresholds requires financial disclosure and a lien determination."
+  retrieved: "2026-09-01"
+ppia:
+  source: "IRS Topic No. 202; IRM 5.14.2"
+  url: "https://www.irs.gov/irm/part5/irm_05-014-002r"
+  authority: irm
+  excerpt_paraphrase: "If you cannot full-pay by the CSED, a Partial Payment IA may apply; reviewed every two years."
+  retrieved: "2026-09-01"
+cnc:
+  source: "IRM 5.16.1; Treas. Reg. §301.6343-1"
+  url: "https://www.irs.gov/irm/part5/irm_05-016-001"
+  authority: irm
+  excerpt_paraphrase: "Collection is suspended when it would leave the taxpayer unable to meet basic living expenses."
+  retrieved: "2026-09-01"
+oic_grounds:
+  source: "IRS Topic No. 204, Offer in Compromise"
+  url: "https://www.irs.gov/taxtopics/tc204"
+  authority: irs_gov
+  excerpt_paraphrase: "Doubt as to collectibility exists when assets plus future income are less than the full liability."
+  retrieved: "2026-09-01"
+oic_rcp:
+  source: "IRM 5.8.5"
+  url: "https://www.irs.gov/irm/part5/irm_05-008-005"
+  authority: irm
+  excerpt_paraphrase: "RCP = net realizable equity plus future income (12 months lump-sum, 24 months periodic)."
+  retrieved: "2026-09-01"
+oic_eta:
+  source: "IRM 5.8.11; IRM 33.3.2"
+  url: "https://www.irs.gov/irm/part33/irm_33-003-002"
+  authority: irm
+  excerpt_paraphrase: "Effective Tax Administration offers apply when collection in full would be inequitable despite ability to pay."
+  retrieved: "2026-09-01"
+oic_low_income:
+  source: "Form 656 Booklet"
+  url: "https://www.irs.gov/forms-pubs/about-form-656"
+  authority: form_instructions
+  excerpt_paraphrase: "Low-income certification (household income <= 250% of the poverty guideline) waives the OIC fee and initial payment."
+  retrieved: "2026-09-01"
+fta:
+  source: "Penalty relief due to First Time Abate"
+  url: "https://www.irs.gov/businesses/small-businesses-self-employed/penalty-relief-due-to-first-time-penalty-abatement-or-other-administrative-waiver"
+  authority: irs_gov
+  excerpt_paraphrase: "First Time Abate waives FTF/FTP/FTD penalties with a clean 3-year compliance history."
+  retrieved: "2026-09-01"
+reasonable_cause:
+  source: "IRM 20.1.1.3.2"
+  url: "https://www.irs.gov/irm/part20/irm_20-001-001r"
+  authority: irm
+  excerpt_paraphrase: "Reasonable cause removes penalties where ordinary business care was exercised but compliance was impossible."
+  retrieved: "2026-09-01"
+innocent_spouse:
+  source: "IRC §6015; Pub 971; Form 8857"
+  url: "https://www.irs.gov/forms-pubs/about-form-8857"
+  authority: form_instructions
+  excerpt_paraphrase: "Innocent spouse relief may relieve one spouse of joint and several liability."
+  retrieved: "2026-09-01"
+injured_spouse:
+  source: "Form 8379"
+  url: "https://www.irs.gov/forms-pubs/about-form-8379"
+  authority: form_instructions
+  excerpt_paraphrase: "Injured spouse allocation recovers your share of a refund offset to your spouse's separate debt."
+  retrieved: "2026-09-01"
+collection_standards:
+  source: "Collection Financial Standards"
+  url: "https://www.irs.gov/businesses/small-businesses-self-employed/collection-financial-standards"
+  authority: irs_gov
+  excerpt_paraphrase: "Allowable living expenses are capped at national and local standards when computing disposable income."
+  retrieved: "2026-09-01"
+csed:
+  source: "IRC §6502; IRM 5.1.19"
+  url: "https://www.irs.gov/irm/part5/irm_05-001-019"
+  authority: irm
+  excerpt_paraphrase: "The collection statute expires 10 years from assessment, subject to tolling events."
+  retrieved: "2026-09-01"
+cdp:
+  source: "Pub 1660; Form 12153"
+  url: "https://www.irs.gov/forms-pubs/about-form-12153"
+  authority: form_instructions
+  excerpt_paraphrase: "A Collection Due Process request within 30 days of the notice preserves Tax Court review and suspends levy."
+  retrieved: "2026-09-01"
+cap:
+  source: "Pub 1660; Form 9423"
+  url: "https://www.irs.gov/forms-pubs/about-form-9423"
+  authority: form_instructions
+  excerpt_paraphrase: "Collection Appeals Program is faster than CDP but has no Tax Court review."
+  retrieved: "2026-09-01"
+lien_relief:
+  source: "Pub 783/784; Forms 12277, 14135, 14134"
+  url: "https://www.irs.gov/businesses/small-businesses-self-employed/understanding-a-federal-tax-lien"
+  authority: irs_gov
+  excerpt_paraphrase: "A direct-debit IA under $25,000 can qualify for lien withdrawal on Form 12277."
+  retrieved: "2026-09-01"
+levy_release:
+  source: "IRC §6343; Pub 594"
+  url: "https://www.irs.gov/businesses/small-businesses-self-employed/levy"
+  authority: irs_gov
+  excerpt_paraphrase: "A levy is released when it creates economic hardship or an installment agreement is entered."
+  retrieved: "2026-09-01"
+passport:
+  source: "IRC §7345"
+  url: "https://www.irs.gov/businesses/small-businesses-self-employed/revocation-or-denial-of-passport-in-case-of-certain-unpaid-taxes"
+  authority: irc
+  excerpt_paraphrase: "Passport certification reverses within 30 days of entering an IA, OIC, or CNC-hardship resolution."
+  retrieved: "2026-09-01"
+bankruptcy:
+  source: "Pub 908"
+  url: "https://www.irs.gov/forms-pubs/about-publication-908"
+  authority: irs_gov
+  excerpt_paraphrase: "Income tax may be dischargeable in bankruptcy when the 3-year, 2-year, and 240-day timing tests are met."
+  retrieved: "2026-09-01"
+tas:
+  source: "Form 911, Taxpayer Advocate Service"
+  url: "https://www.irs.gov/forms-pubs/about-form-911"
+  authority: form_instructions
+  excerpt_paraphrase: "The Taxpayer Advocate Service assists with economic hardship and unresolved IRS delays."
+  retrieved: "2026-09-01"
+litc:
+  source: "Pub 4134, Low Income Taxpayer Clinics"
+  url: "https://www.irs.gov/forms-pubs/about-publication-4134"
+  authority: irs_gov
+  excerpt_paraphrase: "Low Income Taxpayer Clinics provide free representation to eligible taxpayers."
+  retrieved: "2026-09-01"

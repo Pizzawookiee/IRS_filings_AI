@@ -1,0 +1,60 @@
+# IRS Resolve thresholds — architecture §4.3. Config, not code. Values as of Sept 2026.
+# "(verify current)" items carry `# TODO verify`; do not look them up (build prompt rule).
+config_version: "2026-09"
+effective_date: "2026-09-01"
+disclaimer: >
+  This is a screening result based on the information you provided and publicly available IRS
+  guidance as of the cited dates. The IRS makes the final eligibility determination. This is not
+  legal or tax advice.
+
+guaranteed_ia:
+  max_tax_balance: 10000        # IRC §6159(c)
+  max_term_months: 36           # IRC §6159(c)
+
+simple_plan:
+  individual:
+    max_balance: 50000          # irs.gov Topic 202
+  business:
+    max_balance: 50000
+  business_trust_fund:
+    max_balance: 25000
+  max_term_months: 120          # to CSED (<=120) # TODO verify vs 72 in older 9465
+
+short_term_plan:
+  max_days: 180
+
+direct_debit_required_above: 25000   # IRM 5.14
+
+oic:
+  quick_sale_factor: 0.80       # IRM 5.8.5
+  lump_sum_months: 12
+  periodic_months: 24
+  cash_exemption: 1000
+  low_income_poverty_multiplier: 2.5
+  application_fee: 205          # TODO verify
+  initial_payment_pct_lump: 0.20
+  retirement_tax_penalty_estimate: 0.30   # TODO verify — not in §4.3; needed by nre_retirement
+
+fta:
+  clean_history_years: 3        # IRM 20.1.1
+
+ppia:
+  review_interval_months: 24    # IRM 5.14.2
+  equity_materiality_threshold: 10000   # TODO verify — not in §4.3; routes PPIA vs OIC-DATC
+
+csed:
+  years: 10                     # IRC §6502
+
+passport:
+  seriously_delinquent_threshold: 66000   # TODO verify — IRC §7345 (indexed)
+
+bankruptcy:
+  three_year_rule_days: 1095
+  two_year_rule_days: 730
+  assessment_rule_days: 240
+
+cdp:
+  window_days: 30
+  equivalent_hearing_days: 365
+
+vehicle_exemption: 0            # ponytail: IRS equity exemption is small/situational; 0 for v1

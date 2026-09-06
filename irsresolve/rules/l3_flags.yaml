@@ -1,0 +1,130 @@
+# Layer 3 — parallel flags (architecture §6 L3_flag_rule). All-match, additive; these stack on top
+# of any primary path. P0 flags render in the urgent block first. FTA/reasonable-cause carry
+# `rerun_with` so the engine re-tests the tiers with penalties removed.
+
+- id: L3.fta
+  layer: L3
+  when: d.penalty_only_balance > 0 and f.circumstances.prior_3yr_penalty_history == False and f.compliance.returns_filed_all
+  flags: [FTA_ELIGIBLE]
+  rerun_with: total_debt_if_penalties_abated
+  reason: >
+    You have no penalties in the prior three tax years, so your ${d.penalty_only_balance:,.0f} in
+    failure-to-file and failure-to-pay penalties is eligible for a First Time Abate administrative waiver.
+  citations: [fta]
+  uses: [penalty_only_balance, circumstances.prior_3yr_penalty_history, compliance.returns_filed_all]
+
+- id: L3.reasonable_cause
+  layer: L3
+  when: d.penalty_only_balance > 0 and f.circumstances.penalty_reason_category not in ["none"]
+  flags: [REASONABLE_CAUSE_CANDIDATE]
+  rerun_with: total_debt_if_penalties_abated
+  reason: >
+    You described a circumstance that may support reasonable-cause penalty relief on your
+    ${d.penalty_only_balance:,.0f} in penalties.
+  citations: [reasonable_cause]
+  uses: [penalty_only_balance, circumstances.penalty_reason_category]
+
+- id: L3.statutory_relief
+  layer: L3
+  when: f.circumstances.combat_zone or f.circumstances.disaster_zone_resident
+  flags: [STATUTORY_PENALTY_RELIEF]
+  reason: >
+    A disaster declaration or combat-zone designation may entitle you to statutory penalty and
+    filing relief, sometimes granted automatically.
+  citations: [fta]
+  uses: [circumstances.combat_zone, circumstances.disaster_zone_resident]
+
+- id: L3.innocent_spouse
+  layer: L3
+  when: any_period(f.debt.tax_periods, "filed_jointly") and intersects(f.circumstances.spouse_issues, ["spouse_concealed_income", "separated_or_divorced", "abuse"])
+  flags: [INNOCENT_SPOUSE_CANDIDATE]
+  referral: true
+  reason: >
+    You filed jointly and describe a spouse-related issue, so you may qualify for innocent spouse
+    relief from part of the joint liability. Note the IRS must contact your spouse.
+  citations: [innocent_spouse]
+  uses: [debt.tax_periods, circumstances.spouse_issues]
+
+- id: L3.injured_spouse
+  layer: L3
+  when: '"refund_offset_to_spouse_debt" in f.circumstances.spouse_issues'
+  flags: [INJURED_SPOUSE_8379]
+  reason: >
+    Your refund was applied to your spouse's separate debt, so an injured spouse allocation can
+    recover your share.
+  citations: [injured_spouse]
+  uses: [circumstances.spouse_issues]
+
+- id: L3.urgent_levy
+  layer: L3
+  when: intersects(f.enforcement.enforcement_flags, ["levy_wage", "levy_bank"])
+  flags: [URGENT_LEVY_RELEASE]
+  priority: P0
+  reason: >
+    You have an active levy. A hardship release, or simply entering an installment agreement, stops it.
+  citations: [levy_release]
+  uses: [enforcement.enforcement_flags]
+
+- id: L3.cdp_window
+  layer: L3
+  when: d.cdp_window_open
+  flags: [CDP_WINDOW_OPEN]
+  priority: P0
+  extras:
+    days_remaining: cfg.cdp.window_days - d.days_since_cdp_notice
+  reason: >
+    A levy or lien notice was issued {d.days_since_cdp_notice} days ago. File Form 12153 within the
+    remaining window to preserve Tax Court review and suspend the levy.
+  citations: [cdp]
+  uses: [cdp_window_open, days_since_cdp_notice]
+
+- id: L3.equivalent_hearing
+  layer: L3
+  when: d.equivalent_hearing_open
+  flags: [EQUIVALENT_HEARING_OPEN]
+  reason: >
+    The 30-day Collection Due Process window has passed, but you may request an equivalent hearing
+    within one year (without Tax Court review).
+  citations: [cdp]
+  uses: [equivalent_hearing_open]
+
+- id: L3.lien_withdrawal
+  layer: L3
+  when: '"lien_filed" in f.enforcement.enforcement_flags and d.primary_outcome in ["GUARANTEED_IA", "SIMPLE_PAYMENT_PLAN"] and d.total_debt <= cfg.direct_debit_required_above'
+  flags: [LIEN_WITHDRAWAL_ELIGIBLE]
+  reason: >
+    A direct-debit installment agreement under ${cfg.direct_debit_required_above:,.0f} qualifies your
+    filed lien for withdrawal on Form 12277.
+  citations: [lien_relief]
+  uses: [enforcement.enforcement_flags, primary_outcome, total_debt]
+
+- id: L3.passport
+  layer: L3
+  when: '"passport_certified" in f.enforcement.enforcement_flags'
+  flags: [PASSPORT_REVERSAL_ON_RESOLUTION]
+  reason: >
+    Your passport was certified as seriously delinquent. Entering an installment agreement, offer, or
+    Currently Not Collectible status reverses the certification within 30 days.
+  citations: [passport]
+  uses: [enforcement.enforcement_flags]
+
+- id: L3.bankruptcy_discharge
+  layer: L3
+  when: f.compliance.bankruptcy_status == "none" and d.bankruptcy_dischargeable_possible
+  flags: [BANKRUPTCY_DISCHARGE_POSSIBLE]
+  referral: true
+  reason: >
+    Some of your tax periods meet the bankruptcy timing tests, so part of the debt may be
+    dischargeable. This is a court process — consult a bankruptcy attorney.
+  citations: [bankruptcy]
+  uses: [compliance.bankruptcy_status, bankruptcy_dischargeable_possible]
+
+- id: L3.tas_referral
+  layer: L3
+  when: intersects(f.enforcement.enforcement_flags, ["levy_wage", "levy_bank"]) and d.disposable_income <= 0
+  flags: [TAS_REFERRAL]
+  reason: >
+    Active enforcement combined with no ability to pay is exactly what the Taxpayer Advocate Service
+    exists to help with (Form 911).
+  citations: [tas]
+  uses: [enforcement.enforcement_flags, disposable_income]

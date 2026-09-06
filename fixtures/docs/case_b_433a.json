@@ -1,0 +1,6 @@
+{
+  "section1": {"household_size": 3, "zip_code": "01608", "state": "MA"},
+  "section3": {"cash_and_bank": 800, "vehicles": [{"fmv": 6000, "loan_balance": 7000, "is_necessary": true}]},
+  "section5": {"housing_utilities": 900, "transportation_ownership": 200, "transportation_operating": 165,
+               "healthcare_out_of_pocket": 0, "food_clothing_misc": 0, "taxes_withheld_or_estimated": 200}
+}

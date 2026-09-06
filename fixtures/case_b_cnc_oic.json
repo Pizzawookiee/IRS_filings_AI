@@ -1,0 +1,30 @@
+{
+  "as_of": "2026-09-06",
+  "facts": {
+    "identity": {"taxpayer_type": "self_employed", "age": 40},
+    "debt": {
+      "tax_periods": [
+        {"year": 2021, "tax_type": "income_1040", "tax": 36000, "penalty": 3000, "interest": 2000,
+         "assessment_date": "2020-01-01", "return_filed_date": "2022-04-15", "return_due_date": "2022-04-15",
+         "filed_jointly": false}
+      ],
+      "liability_disputed": false
+    },
+    "compliance": {"returns_filed_all": true, "current_year_estimated_paid": true, "bankruptcy_status": "none"},
+    "quick_capacity": {"can_full_pay_180_days": false, "proposed_monthly_payment": 100,
+                       "prior_5yr_compliance": false, "prior_ia_in_5yrs": false},
+    "household": {"household_size": 3, "zip_code": "01608", "state": "MA"},
+    "income": {"monthly_gross_income": 3100,
+               "income_sources": [{"type": "self_employment", "amount": 3100, "source_name": "Contract work"}]},
+    "expenses": {"housing_utilities": 900, "food_clothing_misc": 0, "transportation_ownership": 200,
+                 "transportation_operating": 165, "healthcare_out_of_pocket": 0,
+                 "taxes_withheld_or_estimated": 200},
+    "assets": {"cash_and_bank": 800, "vehicles": [{"fmv": 6000, "loan_balance": 7000, "is_necessary": true}]},
+    "enforcement": {"enforcement_flags": ["none"]},
+    "circumstances": {"prior_3yr_penalty_history": true, "penalty_reason_category": "none",
+                      "combat_zone": false, "disaster_zone_resident": false,
+                      "hardship_circumstances": ["none"], "spouse_issues": ["none"]}
+  },
+  "_expected": {"primary": "CNC", "alternatives": ["OIC_DATC_CANDIDATE"],
+                "flags": ["OIC_FEE_WAIVER", "LITC_REFERRAL"], "urgent": []}
+}
