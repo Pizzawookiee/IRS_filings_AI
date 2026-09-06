@@ -199,7 +199,13 @@ class OpenRouterDocumentParser:
         )
         return self.parse_bytes(file_path.read_bytes(), file_path.name, media_type)
 
-    def parse_bytes(self, data: bytes, filename: str, media_type: str) -> ProposedFacts:
+    def parse_bytes(
+        self,
+        data: bytes,
+        filename: str,
+        media_type: str,
+        expected_document_type: DocumentType | None = None,
+    ) -> ProposedFacts:
         media_type = media_type.lower().split(";", 1)[0].strip()
         if media_type not in SUPPORTED_MEDIA_TYPES:
             raise UnsupportedDocumentError(
@@ -212,7 +218,9 @@ class OpenRouterDocumentParser:
         if not self.api_key:
             raise MissingCredentialsError("Set OPENROUTER_API_KEY before extracting documents")
 
-        payload = self._build_payload(data, filename, media_type)
+        filename_type = self._document_type_from_filename(filename)
+        expected_type = expected_document_type or filename_type
+        payload = self._build_payload(data, filename, media_type, expected_document_type=expected_type)
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -235,7 +243,11 @@ class OpenRouterDocumentParser:
 
         if response.status_code >= 400:
             self._raise_api_error(response)
-        return self._parse_response(response, filename=filename)
+        return self._parse_response(
+            response,
+            filename=filename,
+            expected_document_type=expected_type,
+        )
 
     @staticmethod
     def _is_parameter_routing_failure(response: httpx.Response) -> bool:
@@ -247,7 +259,14 @@ class OpenRouterDocumentParser:
             return False
         return "no endpoints found that can handle the requested parameters" in message.lower()
 
-    def _build_payload(self, data: bytes, filename: str, media_type: str) -> dict[str, Any]:
+    def _build_payload(
+        self,
+        data: bytes,
+        filename: str,
+        media_type: str,
+        *,
+        expected_document_type: DocumentType | None = None,
+    ) -> dict[str, Any]:
         encoded = base64.b64encode(data).decode("ascii")
         data_url = f"data:{media_type};base64,{encoded}"
         if media_type == "application/pdf":
@@ -267,7 +286,15 @@ class OpenRouterDocumentParser:
                     "content": [
                         {
                             "type": "text",
-                            "text": "Classify this tax document and extract supported proposed facts.",
+                            "text": (
+                                "Extract supported proposed facts. "
+                                + (
+                                    f"The upload category is {expected_document_type}; return "
+                                    f'document_type exactly as "{expected_document_type}".'
+                                    if expected_document_type
+                                    else "Classify this tax document and return document_type."
+                                )
+                            ),
                         },
                         attachment,
                     ],
@@ -358,7 +385,13 @@ class OpenRouterDocumentParser:
         matches = {document_type for marker, document_type in markers if marker in normalized}
         return matches.pop() if len(matches) == 1 else None
 
-    def _parse_response(self, response: httpx.Response, *, filename: str = "") -> ProposedFacts:
+    def _parse_response(
+        self,
+        response: httpx.Response,
+        *,
+        filename: str = "",
+        expected_document_type: DocumentType | None = None,
+    ) -> ProposedFacts:
         try:
             body = response.json()
         except ValueError as exc:
@@ -378,7 +411,7 @@ class OpenRouterDocumentParser:
             )
         raw = self._decode_json_content(content)
         if "document_type" not in raw:
-            inferred_type = self._document_type_from_filename(filename)
+            inferred_type = expected_document_type or self._document_type_from_filename(filename)
             if inferred_type:
                 raw = {**raw, "document_type": inferred_type}
         try:

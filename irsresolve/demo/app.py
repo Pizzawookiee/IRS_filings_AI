@@ -93,9 +93,20 @@ def _start_over() -> None:
     st.session_state.page = "Questions"
 
 
-def extract_uploaded_document(data: bytes, filename: str, media_type: str, parser=None):
+def extract_uploaded_document(
+    data: bytes,
+    filename: str,
+    media_type: str,
+    parser=None,
+    expected_document_type=None,
+):
     """Small testable boundary between Streamlit uploads and the OpenRouter parser."""
-    return (parser or OpenRouterDocumentParser()).parse_bytes(data, filename, media_type)
+    return (parser or OpenRouterDocumentParser()).parse_bytes(
+        data,
+        filename,
+        media_type,
+        expected_document_type=expected_document_type,
+    )
 
 
 def _draft() -> QuestionnaireDraft:
@@ -493,7 +504,10 @@ def page_documents():
             try:
                 with st.spinner(f"Classifying and extracting {upload.name}…"):
                     proposed = extract_uploaded_document(
-                        upload.getvalue(), upload.name, upload.type or "application/octet-stream"
+                        upload.getvalue(),
+                        upload.name,
+                        upload.type or "application/octet-stream",
+                        expected_document_type=_suggest_document_type(upload.name, required_type),
                     )
                 st.session_state.documents = [
                     record for record in st.session_state.documents if record["filename"] != upload.name

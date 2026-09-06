@@ -183,6 +183,26 @@ def test_missing_classification_with_ambiguous_filename_is_rejected():
         )
 
 
+def test_explicit_upload_category_recovers_missing_classification():
+    body = _body("433a", [{
+        "path": "expenses.housing_utilities", "value": 1200, "ref": "Monthly expenses"
+    }])
+    content = json.loads(body["choices"][0]["message"]["content"])
+    del content["document_type"]
+    body["choices"][0]["message"]["content"] = json.dumps(content)
+    seen = {}
+
+    def handler(request):
+        seen.update(json.loads(request.content))
+        return httpx.Response(200, json=body)
+
+    result = _parser(handler).parse_bytes(
+        b"pdf", "upload.pdf", "application/pdf", expected_document_type="433a"
+    )
+    assert result.document_type == "433a"
+    assert 'document_type exactly as "433a"' in seen["messages"][1]["content"][0]["text"]
+
+
 def test_schema_error_names_location_without_echoing_value():
     body = _body(values=[{"path": "identity.age", "value": "sensitive-invalid", "ref": "page 1"}])
     parser = _parser(lambda request: httpx.Response(200, json=body))
@@ -232,8 +252,9 @@ def test_cli_reports_missing_configuration(monkeypatch, tmp_path, capsys):
 
 def test_streamlit_upload_boundary_uses_parser():
     class FakeParser:
-        def parse_bytes(self, data, filename, media_type):
+        def parse_bytes(self, data, filename, media_type, expected_document_type=None):
             assert (data, filename, media_type) == (b"img", "w2.png", "image/png")
+            assert expected_document_type is None
             return "proposed"
 
     assert extract_uploaded_document(b"img", "w2.png", "image/png", FakeParser()) == "proposed"
