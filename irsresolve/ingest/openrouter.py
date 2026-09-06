@@ -101,7 +101,9 @@ You do not give advice or decide eligibility. Classify the document as exactly o
 433a, 433b, notice, transcript. Return only facts explicitly supported by the document, using only
 the allowed canonical paths. Do not infer missing values. Use ISO YYYY-MM-DD dates and plain decimal
 numbers without currency symbols. For annual W-2 wages/withholding or 1099 gross receipts, convert
-to monthly amounts by dividing by 12 and name the source box in ref. A 1099 is gross income and must
+to monthly amounts by dividing by 12 and name the source box in ref. The value must be a JSON number,
+not a calculation string or object. Example: W-2 Box 1 wages of 90000.00 must use value 7500.00.
+A 1099 is gross income and must
 never populate any expenses.* path. For every value provide a concise page, box, line, or section
 reference. Collection-valued paths such as debt.tax_periods must be returned once with the complete
 list, never as duplicate paths. If the document contains no supported values, return an empty values
@@ -466,20 +468,58 @@ class OpenRouterDocumentParser:
             return value
         period = None
         if isinstance(value, dict):
-            if not set(value).issubset({"amount", "value", "currency", "period", "unit"}):
-                return value
+            monthly_keys = [key for key in ("monthly", "monthly_amount") if key in value]
+            annual_keys = [key for key in ("annual", "annual_amount") if key in value]
             amount_keys = [key for key in ("amount", "value") if key in value]
             currency = str(value.get("currency") or "USD").upper()
-            if len(amount_keys) != 1 or currency not in {"USD", "$"}:
+            if currency not in {"USD", "$"}:
                 return value
-            period = str(value.get("period") or value.get("unit") or "").lower().strip() or None
-            value = value[amount_keys[0]]
+            if len(monthly_keys) == 1:
+                value = value[monthly_keys[0]]
+                period = "monthly"
+            elif len(annual_keys) == 1 and path == "income.monthly_gross_income":
+                value = value[annual_keys[0]]
+                period = "annual"
+            elif len(amount_keys) == 1:
+                period = str(value.get("period") or value.get("unit") or "").lower().strip() or None
+                value = value[amount_keys[0]]
+            else:
+                return value
         if not isinstance(value, (str, int, float, Decimal)) or isinstance(value, bool):
             return value
         candidate = value.strip() if isinstance(value, str) else str(value)
+        arithmetic = re.fullmatch(
+            r"\s*\$?([\d,]+(?:\.\d+)?)\s*(?:/|÷)\s*12(?:\s*months?)?\s*"
+            r"(?:=\s*\$?([\d,]+(?:\.\d+)?))?\s*",
+            candidate,
+            flags=re.IGNORECASE,
+        )
+        if arithmetic and path == "income.monthly_gross_income":
+            annual = Decimal(arithmetic.group(1).replace(",", ""))
+            calculated = annual / Decimal(12)
+            stated = arithmetic.group(2)
+            if stated is not None:
+                stated_number = Decimal(stated.replace(",", ""))
+                if abs(stated_number - calculated) > Decimal("0.01"):
+                    return value
+                return stated_number
+            return calculated
+        result_first = re.fullmatch(
+            r"\s*\$?([\d,]+(?:\.\d+)?)\s*\(\s*\$?([\d,]+(?:\.\d+)?)\s*"
+            r"(?:/|÷)\s*12(?:\s*months?)?\s*\)\s*",
+            candidate,
+            flags=re.IGNORECASE,
+        )
+        if result_first and path == "income.monthly_gross_income":
+            stated_number = Decimal(result_first.group(1).replace(",", ""))
+            annual = Decimal(result_first.group(2).replace(",", ""))
+            if abs(stated_number - annual / Decimal(12)) <= Decimal("0.01"):
+                return stated_number
+            return value
         lowered = candidate.lower()
         suffixes = {
             "/month": "monthly", " per month": "monthly", " monthly": "monthly",
+            " (monthly)": "monthly", " (per month)": "monthly",
             "/mo": "monthly", " per mo": "monthly", " annually": "annual",
             " annual": "annual", " per year": "annual", "/year": "annual",
         }

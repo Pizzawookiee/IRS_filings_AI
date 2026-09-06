@@ -112,6 +112,13 @@ def test_success_is_typed_unattested_and_has_document_provenance():
         ("$5,000/month", "5000"),
         ("USD 60,000 annually", "5000"),
         ({"amount": "$60,000", "currency": "USD", "period": "annual"}, "5000"),
+        ({"annual_amount": "60000"}, "5000"),
+        ({"monthly_amount": "$5,000"}, "5000"),
+        ("90,000.00 / 12 = 7,500.00", "7500.00"),
+        ("90,000.00 ÷ 12", "7500.00"),
+        ("90,000.00 / 12 months = 7,500.00", "7500.00"),
+        ("7,500.00 (90,000.00 / 12)", "7500.00"),
+        ("$5,000 (monthly)", "5000"),
     ],
 )
 def test_unambiguous_currency_formatting_is_normalized(formatted, expected):
@@ -127,6 +134,18 @@ def test_unambiguous_currency_formatting_is_normalized(formatted, expected):
 def test_ambiguous_currency_text_remains_invalid():
     body = _body(values=[{
         "path": "income.monthly_gross_income", "value": "about $5,000", "ref": "Box one"
+    }])
+    with pytest.raises(DocumentInferenceError, match="Invalid value"):
+        _parser(lambda request: httpx.Response(200, json=body)).parse_bytes(
+            b"pdf", "w2.pdf", "application/pdf"
+        )
+
+
+def test_incorrect_stated_monthly_calculation_is_rejected():
+    body = _body(values=[{
+        "path": "income.monthly_gross_income",
+        "value": "90,000 / 12 = 8,000",
+        "ref": "Box one",
     }])
     with pytest.raises(DocumentInferenceError, match="Invalid value"):
         _parser(lambda request: httpx.Response(200, json=body)).parse_bytes(
