@@ -174,6 +174,109 @@ def test_incorrect_stated_monthly_calculation_is_rejected():
         )
 
 
+@pytest.mark.parametrize(
+    ("formatted", "expected"),
+    [
+        ("7 people", 7),
+        ("7 (taxpayer + spouse + 5 dependents)", 7),
+        ("taxpayer and dependents; household size = 6", 6),
+        ({"household_size": "4"}, 4),
+    ],
+)
+def test_household_size_labeled_totals_are_normalized(formatted, expected):
+    body = _body("433a", [{
+        "path": "household.household_size", "value": formatted, "ref": "Section one"
+    }])
+    result = _parser(lambda request: httpx.Response(200, json=body)).parse_bytes(
+        b"pdf", "form-433a.pdf", "application/pdf"
+    )
+    assert result.values["household.household_size"]["value"] == expected
+
+
+def test_dependent_only_count_is_not_treated_as_household_size():
+    body = _body("433a", [{
+        "path": "household.household_size", "value": "5 dependents", "ref": "Section one"
+    }])
+    with pytest.raises(DocumentInferenceError, match="Invalid value"):
+        _parser(lambda request: httpx.Response(200, json=body)).parse_bytes(
+            b"pdf", "form-433a.pdf", "application/pdf"
+        )
+
+
+def test_normalizes_dates_booleans_enums_locations_and_nested_collections():
+    values = [
+        {"path": "identity.taxpayer_type", "value": "self-employed", "ref": "Heading"},
+        {"path": "identity.has_employees", "value": "checked", "ref": "Business section"},
+        {"path": "identity.age", "value": "45 years old", "ref": "Personal information"},
+        {"path": "household.zip_code", "value": 5812, "ref": "Address"},
+        {"path": "household.state", "value": "North Dakota", "ref": "Address"},
+        {"path": "income.income_sources", "value": [{
+            "type": "Self Employment",
+            "amount": "$12,000 annually",
+            "source_name": "Training business",
+        }], "ref": "Income section"},
+        {"path": "assets.real_estate", "value": [{
+            "fmv": "$250,000",
+            "mortgage_balance": "150,000 USD",
+            "is_primary_residence": "yes (checked)",
+        }], "ref": "Real property"},
+        {"path": "enforcement.notices_received", "value": [{
+            "type": "CP504", "date": "09012026"
+        }], "ref": "Notice"},
+        {"path": "debt.tax_periods", "value": [{
+            "year": "2025", "tax_type": "Income 1040", "tax": "$4,500",
+            "penalty": "$250", "interest": "100 USD", "filed_jointly": "X",
+        }], "ref": "Account details"},
+    ]
+    result = _parser(lambda request: httpx.Response(200, json=_body("433a", values))).parse_bytes(
+        b"pdf", "form-433a.pdf", "application/pdf"
+    )
+    assert result.values["identity.taxpayer_type"]["value"] == "self_employed"
+    assert result.values["identity.has_employees"]["value"] is True
+    assert result.values["identity.age"]["value"] == 45
+    assert result.values["household.zip_code"]["value"] == "05812"
+    assert result.values["household.state"]["value"] == "ND"
+    income_source = result.values["income.income_sources"]["value"][0]
+    assert income_source.type == "self_employment"
+    assert str(income_source.amount) == "1000"
+    real_estate = result.values["assets.real_estate"]["value"][0]
+    assert str(real_estate.fmv) == "250000"
+    assert real_estate.is_primary_residence is True
+    assert result.values["enforcement.notices_received"]["value"][0].date.isoformat() == "2026-09-01"
+    tax_period = result.values["debt.tax_periods"]["value"][0]
+    assert tax_period.tax_type == "income_1040"
+    assert str(tax_period.tax) == "4500"
+    assert tax_period.filed_jointly is True
+
+
+def test_wraps_unambiguous_single_collection_items():
+    values = [
+        {"path": "compliance.unfiled_years", "value": "2024", "ref": "Return history"},
+        {"path": "circumstances.hardship_circumstances", "value": "Serious Illness", "ref": "Notes"},
+        {"path": "assets.vehicles", "value": {
+            "fmv": "$8,000", "loan_balance": "$3,000", "is_necessary": "yes"
+        }, "ref": "Vehicle section"},
+    ]
+    result = _parser(lambda request: httpx.Response(200, json=_body("433a", values))).parse_bytes(
+        b"pdf", "form-433a.pdf", "application/pdf"
+    )
+    assert result.values["compliance.unfiled_years"]["value"] == [2024]
+    assert result.values["circumstances.hardship_circumstances"]["value"] == ["serious_illness"]
+    assert str(result.values["assets.vehicles"]["value"][0].fmv) == "8000"
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [("household.zip_code", "not a zip"), ("household.state", "unknown place")],
+)
+def test_rejects_ambiguous_location_values(path, value):
+    body = _body("433a", [{"path": path, "value": value, "ref": "Address"}])
+    with pytest.raises(DocumentInferenceError, match="Invalid value"):
+        _parser(lambda request: httpx.Response(200, json=body)).parse_bytes(
+            b"pdf", "form-433a.pdf", "application/pdf"
+        )
+
+
 def test_invalid_decimal_shape_gets_one_schema_repair_pass():
     requests = []
     invalid = _body(values=[{
@@ -322,6 +425,25 @@ def test_repairs_incomplete_value_item_once():
     assert list(result.values) == ["assets.cash_and_bank"]
     assert len(requests) == 2
     assert "Remove any incomplete item" in requests[1]["messages"][1]["content"]
+
+
+def test_repairs_duplicate_paths_once():
+    requests = []
+    duplicate = _body("433a", [
+        {"path": "assets.cash_and_bank", "value": 100, "ref": "Cash"},
+        {"path": "assets.cash_and_bank", "value": 200, "ref": "Bank"},
+    ])
+    repaired = _body("433a", [{
+        "path": "assets.cash_and_bank", "value": 300, "ref": "Cash plus bank total"
+    }])
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json=duplicate if len(requests) == 1 else repaired)
+
+    result = _parser(handler).parse_bytes(b"pdf", "form-433a.pdf", "application/pdf")
+    assert str(result.values["assets.cash_and_bank"]["value"]) == "300"
+    assert len(requests) == 2
 
 
 def test_schema_error_names_location_without_echoing_value():

@@ -13,6 +13,7 @@ import mimetypes
 import os
 import re
 import types
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Literal, Union, get_args, get_origin
@@ -53,6 +54,42 @@ SOURCE_BY_DOCUMENT_TYPE = {
     "433b": "433b",
     "notice": "notice",
     "transcript": "transcript",
+}
+STATE_ABBREVIATIONS = dict(
+    pair.split(":")
+    for pair in (
+        "alabama:AL alaska:AK arizona:AZ arkansas:AR california:CA colorado:CO connecticut:CT "
+        "delaware:DE florida:FL georgia:GA hawaii:HI idaho:ID illinois:IL indiana:IN iowa:IA "
+        "kansas:KS kentucky:KY louisiana:LA maine:ME maryland:MD massachusetts:MA michigan:MI "
+        "minnesota:MN mississippi:MS missouri:MO montana:MT nebraska:NE nevada:NV "
+        "new_hampshire:NH new_jersey:NJ new_mexico:NM new_york:NY north_carolina:NC "
+        "north_dakota:ND ohio:OH oklahoma:OK oregon:OR pennsylvania:PA rhode_island:RI "
+        "south_carolina:SC south_dakota:SD tennessee:TN texas:TX utah:UT vermont:VT "
+        "virginia:VA washington:WA west_virginia:WV wisconsin:WI wyoming:WY "
+        "district_of_columbia:DC"
+    ).split()
+)
+STATE_CODES = set(STATE_ABBREVIATIONS.values())
+LITERAL_ALIASES = {
+    "wage_earner": "individual",
+    "individual_wage_earner": "individual",
+    "selfemployed": "self_employed",
+    "self_employment": "self_employment",
+    "sole_proprietor": "sole_prop",
+    "sole_proprietorship": "sole_prop",
+    "s_corporation": "s_corp",
+    "scorporation": "s_corp",
+    "c_corporation": "c_corp",
+    "ccorporation": "c_corp",
+    "limited_liability_company": "llc",
+    "chapter_7": "open_ch7",
+    "chapter_13": "open_ch13",
+    "chapter_7_open": "open_ch7",
+    "chapter_13_open": "open_ch13",
+    "open_chapter_7": "open_ch7",
+    "open_chapter_13": "open_ch13",
+    "irs_advised": "irs_advice",
+    "professional_reliance": "professional_reliance",
 }
 
 
@@ -127,7 +164,9 @@ For Form 433-A and Form 433-B, actively map completed form fields as follows:
 - investments, retirement, life-insurance cash value, real estate, vehicles, business assets, and
   other assets -> their matching assets.* paths
 Use monthly amounts where the form labels them monthly. Do not confuse an asset balance with a
-monthly payment. Extract an explicit zero; do not treat a blank field as zero."""
+monthly payment. Extract an explicit zero; do not treat a blank field as zero. Use JSON integers
+for counts and years, JSON booleans for yes/no fields, ISO YYYY-MM-DD strings for dates, canonical
+enum spellings exactly as listed in the path schema, and JSON arrays for collection-valued paths."""
 
 
 def _response_schema() -> dict[str, Any]:
@@ -146,7 +185,13 @@ def _response_schema() -> dict[str, Any]:
                     "additionalProperties": False,
                     "properties": {
                         "path": {"type": "string", "enum": list(CANONICAL_PATHS)},
-                        "value": {},
+                        "value": {
+                            "description": (
+                                "Use the canonical field type: JSON number for money, integer for "
+                                "counts/years, boolean for yes/no, ISO string for dates, and array "
+                                "for collection paths."
+                            )
+                        },
                         "ref": {"type": "string"},
                     },
                     "required": ["path", "value", "ref"],
@@ -265,6 +310,7 @@ class OpenRouterDocumentParser:
                 repairable = (
                     str(exc).startswith("Invalid value for ")
                     or str(exc).startswith("OpenRouter extraction schema mismatch at values.")
+                    or str(exc).startswith("Model returned duplicate fact path:")
                 )
                 if not repairable:
                     raise
@@ -395,6 +441,12 @@ class OpenRouterDocumentParser:
         raw: dict[str, Any],
         expected_document_type: DocumentType | None,
     ) -> dict[str, Any]:
+        type_requirements = []
+        for item in raw.get("values", []):
+            if isinstance(item, dict) and item.get("path") in CANONICAL_LEAVES:
+                path = item["path"]
+                type_requirements.append(f"{path}: {self._value_type_instruction(path)}")
+        requirements_text = "; ".join(dict.fromkeys(type_requirements))
         return {
             "model": self.model,
             "messages": [
@@ -411,6 +463,7 @@ class OpenRouterDocumentParser:
                             f'Set document_type to "{expected_document_type}". '
                             if expected_document_type else ""
                         )
+                        + (f"Required value types: {requirements_text}. " if requirements_text else "")
                         + "Invalid extraction JSON:\n"
                         + json.dumps(raw, default=str)
                     ),
@@ -431,6 +484,40 @@ class OpenRouterDocumentParser:
             "reasoning": {"max_tokens": 1024, "exclude": True},
             "stream": False,
         }
+
+    @staticmethod
+    def _value_type_instruction(path: str) -> str:
+        annotation = CANONICAL_LEAVES[path].model_fields["value"].annotation
+        return OpenRouterDocumentParser._annotation_type_instruction(annotation)
+
+    @staticmethod
+    def _annotation_type_instruction(annotation: Any) -> str:
+        annotation = _strip_optional(annotation)
+        origin = get_origin(annotation)
+        if annotation is Decimal:
+            return "JSON number"
+        if annotation is int:
+            return "JSON integer"
+        if annotation is bool:
+            return "JSON boolean"
+        if annotation is date:
+            return "ISO YYYY-MM-DD string"
+        if annotation is str:
+            return "JSON string"
+        if origin is list:
+            return (
+                "JSON array whose items are "
+                + OpenRouterDocumentParser._annotation_type_instruction(get_args(annotation)[0])
+            )
+        if origin is Literal:
+            return "one of " + ", ".join(json.dumps(item) for item in get_args(annotation))
+        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+            fields = ", ".join(
+                f"{name}: {OpenRouterDocumentParser._annotation_type_instruction(field.annotation)}"
+                for name, field in annotation.model_fields.items()
+            )
+            return f"JSON object with fields {{{fields}}}"
+        return "value matching the canonical field"
 
     @staticmethod
     def _raise_api_error(response: httpx.Response) -> None:
@@ -562,6 +649,7 @@ class OpenRouterDocumentParser:
             if item.path in proposals:
                 raise DocumentInferenceError(f"Model returned duplicate fact path: {item.path}")
             normalized_value = self._normalize_scalar(item.path, item.value)
+            self._validate_normalized_value(item.path, normalized_value)
             wrapped = {
                 "value": normalized_value,
                 "provenance": {"source": source, "ref": item.ref, "attested": False},
@@ -580,10 +668,67 @@ class OpenRouterDocumentParser:
 
     @staticmethod
     def _normalize_scalar(path: str, value: Any) -> Any:
-        """Normalize unambiguous currency formatting for Decimal leaves only."""
+        """Normalize an extracted value according to its canonical annotation."""
         annotation = CANONICAL_LEAVES[path].model_fields["value"].annotation
-        if annotation is not Decimal:
+        return OpenRouterDocumentParser._normalize_for_annotation(annotation, value, path)
+
+    @staticmethod
+    def _normalize_for_annotation(annotation: Any, value: Any, path: str) -> Any:
+        annotation = _strip_optional(annotation)
+        origin = get_origin(annotation)
+        if value is None:
             return value
+        if annotation is Decimal:
+            return OpenRouterDocumentParser._normalize_decimal(path, value)
+        if annotation is int:
+            return OpenRouterDocumentParser._normalize_integer(path, value)
+        if annotation is bool:
+            return OpenRouterDocumentParser._normalize_boolean(value)
+        if annotation is date:
+            return OpenRouterDocumentParser._normalize_date(value)
+        if annotation is str:
+            return OpenRouterDocumentParser._normalize_string(path, value)
+        if origin is Literal:
+            return OpenRouterDocumentParser._normalize_literal(annotation, value)
+        if origin is list:
+            item_annotation = get_args(annotation)[0]
+            if not isinstance(value, list):
+                normalized_item = OpenRouterDocumentParser._normalize_for_annotation(
+                    item_annotation, value, f"{path}[]"
+                )
+                item_origin = get_origin(_strip_optional(item_annotation))
+                item_type = _strip_optional(item_annotation)
+                if item_origin is Literal and normalized_item in get_args(item_type):
+                    return [normalized_item]
+                if item_type is int and isinstance(normalized_item, int) and not isinstance(normalized_item, bool):
+                    return [normalized_item]
+                if isinstance(item_type, type) and issubclass(item_type, BaseModel) and isinstance(normalized_item, dict):
+                    return [normalized_item]
+                return value
+            return [
+                OpenRouterDocumentParser._normalize_for_annotation(
+                    item_annotation, item, f"{path}[]"
+                )
+                for item in value
+            ]
+        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+            if not isinstance(value, dict):
+                return value
+            normalized = dict(value)
+            for name, field in annotation.model_fields.items():
+                if name in normalized:
+                    normalized[name] = OpenRouterDocumentParser._normalize_for_annotation(
+                        field.annotation, normalized[name], f"{path}.{name}"
+                    )
+            return normalized
+        return value
+
+    @staticmethod
+    def _normalize_decimal(path: str, value: Any) -> Any:
+        """Normalize only unambiguous money and decimal representations."""
+        if value is None:
+            return value
+        monthly_path = path == "income.monthly_gross_income" or path.startswith("expenses.") or path.startswith("income.income_sources")
         period = None
         if isinstance(value, dict):
             monthly_keys = [key for key in ("monthly", "monthly_amount") if key in value]
@@ -595,7 +740,7 @@ class OpenRouterDocumentParser:
             if len(monthly_keys) == 1:
                 value = value[monthly_keys[0]]
                 period = "monthly"
-            elif len(annual_keys) == 1 and path == "income.monthly_gross_income":
+            elif len(annual_keys) == 1 and monthly_path:
                 value = value[annual_keys[0]]
                 period = "annual"
             elif len(amount_keys) == 1:
@@ -612,7 +757,7 @@ class OpenRouterDocumentParser:
             candidate,
             flags=re.IGNORECASE,
         )
-        if arithmetic and path == "income.monthly_gross_income":
+        if arithmetic and monthly_path:
             annual = Decimal(arithmetic.group(1).replace(",", ""))
             calculated = annual / Decimal(12)
             stated = arithmetic.group(2)
@@ -628,7 +773,7 @@ class OpenRouterDocumentParser:
             candidate,
             flags=re.IGNORECASE,
         )
-        if result_first and path == "income.monthly_gross_income":
+        if result_first and monthly_path:
             stated_number = Decimal(result_first.group(1).replace(",", ""))
             annual = Decimal(result_first.group(2).replace(",", ""))
             if abs(stated_number - annual / Decimal(12)) <= Decimal("0.01"):
@@ -661,13 +806,144 @@ class OpenRouterDocumentParser:
         except InvalidOperation:
             return value
         number = -number if negative else number
-        monthly_path = path == "income.monthly_gross_income" or path.startswith("expenses.")
         if period in {"month", "monthly", "per_month", "mo"} and not monthly_path:
             return value
         if period in {"year", "annual", "annually", "yearly", "per_year"}:
-            if path != "income.monthly_gross_income":
+            if not monthly_path:
                 return value
             number /= Decimal(12)
         elif period not in {None, "month", "monthly", "per_month", "mo"}:
             return value
         return number
+
+    @staticmethod
+    def _normalize_boolean(value: Any) -> Any:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int) and value in (0, 1):
+            return bool(value)
+        if isinstance(value, dict):
+            keys = [key for key in ("checked", "selected", "value", "answer") if key in value]
+            if len(keys) != 1:
+                return value
+            value = value[keys[0]]
+        if not isinstance(value, str):
+            return value
+        candidate = re.sub(r"\s+", " ", value.strip().lower())
+        true_values = {"true", "yes", "y", "1", "x", "checked", "selected", "on", "☒", "yes (checked)"}
+        false_values = {"false", "no", "n", "0", "unchecked", "not selected", "off", "☐", "no (checked)"}
+        if candidate in true_values:
+            return True
+        if candidate in false_values:
+            return False
+        return value
+
+    @staticmethod
+    def _normalize_date(value: Any) -> Any:
+        if isinstance(value, date):
+            return value
+        if isinstance(value, dict):
+            keys = [key for key in ("date", "value") if key in value]
+            if len(keys) != 1:
+                return value
+            value = value[keys[0]]
+        if not isinstance(value, str):
+            return value
+        candidate = value.strip()
+        for date_format in ("%Y-%m-%d", "%m/%d/%Y", "%m-%d-%Y", "%m%d%Y"):
+            try:
+                return datetime.strptime(candidate, date_format).date()
+            except ValueError:
+                continue
+        return value
+
+    @staticmethod
+    def _normalize_literal(annotation: Any, value: Any) -> Any:
+        allowed = get_args(annotation)
+        if value in allowed:
+            return value
+        if not isinstance(value, str) or not all(isinstance(item, str) for item in allowed):
+            return value
+        candidate = re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
+        compact = candidate.replace("_", "")
+        alias = LITERAL_ALIASES.get(candidate) or LITERAL_ALIASES.get(compact)
+        if alias in allowed:
+            return alias
+        return candidate if candidate in allowed else value
+
+    @staticmethod
+    def _normalize_string(path: str, value: Any) -> Any:
+        if path == "household.zip_code":
+            if isinstance(value, (int, float, Decimal)) and not isinstance(value, bool):
+                try:
+                    number = Decimal(str(value))
+                except InvalidOperation:
+                    return value
+                if number != number.to_integral_value():
+                    return value
+                return str(int(number)).zfill(5)
+            if isinstance(value, str):
+                candidate = value.strip()
+                match = re.fullmatch(r"(\d{5})(?:-\d{4})?", candidate)
+                return match.group(1) if match else value
+            return value
+        if path == "household.state" and isinstance(value, str):
+            candidate = re.sub(r"[^a-z]+", "_", value.strip().lower()).strip("_")
+            if candidate.upper() in STATE_CODES:
+                return candidate.upper()
+            return STATE_ABBREVIATIONS.get(candidate, value)
+        return value
+
+    @staticmethod
+    def _validate_normalized_value(path: str, value: Any) -> None:
+        if path == "household.zip_code" and (
+            not isinstance(value, str) or re.fullmatch(r"\d{5}", value) is None
+        ):
+            raise DocumentInferenceError("Invalid value for household.zip_code: expected a five-digit ZIP code")
+        if path == "household.state" and value not in STATE_CODES:
+            raise DocumentInferenceError("Invalid value for household.state: expected a US state abbreviation")
+
+    @staticmethod
+    def _normalize_integer(path: str, value: Any) -> Any:
+        if isinstance(value, dict):
+            keys = [key for key in ("household_size", "total", "count", "value") if key in value]
+            if len(keys) != 1:
+                return value
+            value = value[keys[0]]
+        if isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal)):
+            return value
+        if isinstance(value, (int, float, Decimal)):
+            try:
+                number = Decimal(str(value))
+            except InvalidOperation:
+                return value
+            if number != number.to_integral_value():
+                return value
+            result = int(number)
+        else:
+            candidate = value.strip()
+            plain = re.fullmatch(r"\d+(?:\.0+)?", candidate)
+            age = (
+                re.fullmatch(r"(\d+)\s*(?:years?|years?\s+old|yrs?\.?|y/?o)", candidate, flags=re.IGNORECASE)
+                if path.endswith(".age") else None
+            )
+            labeled = re.fullmatch(
+                r"(\d+)\s*(?:(?:household\s+)?(?:people|persons|members)|total)?\s*(?:\(.*\))?",
+                candidate,
+                flags=re.IGNORECASE,
+            )
+            trailing_total = re.search(
+                r"(?:household\s+size|total)\s*(?:is|=|:)?\s*(\d+)\s*$",
+                candidate,
+                flags=re.IGNORECASE,
+            )
+            equation = re.search(r"=\s*(\d+)\s*$", candidate)
+            match = plain or age or labeled or trailing_total or equation
+            if not match:
+                return value
+            result = int(match.group(1) if match.lastindex else match.group(0).split(".")[0])
+        if path == "household.household_size" and not 1 <= result <= 50:
+            return value
+        if path.endswith(".age") and not 0 <= result <= 120:
+            return value
+        return result
