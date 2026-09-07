@@ -267,7 +267,7 @@ def page_questions():
                 "dispute_reason": dispute_reason if liability_disputed else None,
                 "prior_appeal_or_court": prior_appeal if liability_disputed else None,
                 "can_full_pay_180_days": can_pay,
-                "proposed_monthly_payment": monthly,
+                "proposed_monthly_payment": Decimal(str(monthly)),
                 "prior_5yr_compliance": prior_compliance,
                 "prior_ia_in_5yrs": prior_ia,
             }))

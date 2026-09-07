@@ -153,6 +153,30 @@ def test_incorrect_stated_monthly_calculation_is_rejected():
         )
 
 
+def test_invalid_decimal_shape_gets_one_schema_repair_pass():
+    requests = []
+    invalid = _body(values=[{
+        "path": "income.monthly_gross_income",
+        "value": {"calculation": "annual wages divided monthly"},
+        "ref": "Box one",
+    }])
+    repaired = _body(values=[{
+        "path": "income.monthly_gross_income",
+        "value": 7500,
+        "ref": "Box one divided by twelve",
+    }])
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json=invalid if len(requests) == 1 else repaired)
+
+    result = _parser(handler).parse_bytes(b"pdf", "w2.pdf", "application/pdf")
+    assert str(result.values["income.monthly_gross_income"]["value"]) == "7500"
+    assert len(requests) == 2
+    assert "must be a JSON number" in requests[1]["messages"][1]["content"]
+    assert all(plugin["id"] != "file-parser" for plugin in requests[1]["plugins"])
+
+
 def test_proposal_cannot_reach_engine_without_confirmation():
     parser = _parser(lambda request: httpx.Response(200, json=_body()))
     proposal = parser.parse_bytes(b"image", "w2.png", "image/png").values[

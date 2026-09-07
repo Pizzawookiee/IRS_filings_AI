@@ -232,10 +232,28 @@ class OpenRouterDocumentParser:
         owns_client = self.client is None
         client = self.client or httpx.Client(timeout=self.timeout_seconds)
         try:
-            response = client.post(OPENROUTER_URL, headers=headers, json=payload)
-            if self._is_parameter_routing_failure(response):
-                fallback_payload = {**payload, "provider": {"require_parameters": False}}
-                response = client.post(OPENROUTER_URL, headers=headers, json=fallback_payload)
+            response = self._post_with_routing_fallback(client, headers, payload)
+            if response.status_code >= 400:
+                self._raise_api_error(response)
+            try:
+                return self._parse_response(
+                    response,
+                    filename=filename,
+                    expected_document_type=expected_type,
+                )
+            except DocumentInferenceError as exc:
+                if not str(exc).startswith("Invalid value for "):
+                    raise
+                raw = self._raw_extraction(response)
+                repair_payload = self._build_repair_payload(raw, expected_type)
+                repaired_response = self._post_with_routing_fallback(client, headers, repair_payload)
+                if repaired_response.status_code >= 400:
+                    self._raise_api_error(repaired_response)
+                return self._parse_response(
+                    repaired_response,
+                    filename=filename,
+                    expected_document_type=expected_type,
+                )
         except httpx.TimeoutException as exc:
             raise DocumentInferenceError("OpenRouter timed out while extracting the document") from exc
         except httpx.HTTPError as exc:
@@ -244,13 +262,17 @@ class OpenRouterDocumentParser:
             if owns_client:
                 client.close()
 
-        if response.status_code >= 400:
-            self._raise_api_error(response)
-        return self._parse_response(
-            response,
-            filename=filename,
-            expected_document_type=expected_type,
-        )
+    def _post_with_routing_fallback(
+        self,
+        client: httpx.Client,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+    ) -> httpx.Response:
+        response = client.post(OPENROUTER_URL, headers=headers, json=payload)
+        if self._is_parameter_routing_failure(response):
+            fallback_payload = {**payload, "provider": {"require_parameters": False}}
+            response = client.post(OPENROUTER_URL, headers=headers, json=fallback_payload)
+        return response
 
     @staticmethod
     def _is_parameter_routing_failure(response: httpx.Response) -> bool:
@@ -321,6 +343,45 @@ class OpenRouterDocumentParser:
             payload["plugins"].insert(0, {"id": "file-parser", "pdf": {"engine": self.pdf_engine}})
         return payload
 
+    def _build_repair_payload(
+        self,
+        raw: dict[str, Any],
+        expected_document_type: DocumentType | None,
+    ) -> dict[str, Any]:
+        return {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": (
+                        "Correct this extraction so it exactly matches the JSON schema. Every monetary "
+                        "or decimal fact value must be a JSON number, never text, a calculation, an array, "
+                        "or an object. Preserve only facts supported by the original extraction. "
+                        + (
+                            f'Set document_type to "{expected_document_type}". '
+                            if expected_document_type else ""
+                        )
+                        + "Invalid extraction JSON:\n"
+                        + json.dumps(raw, default=str)
+                    ),
+                },
+            ],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "irs_document_extraction_repair",
+                    "strict": True,
+                    "schema": _response_schema(),
+                },
+            },
+            "plugins": [{"id": "response-healing"}],
+            "provider": {"require_parameters": True},
+            "temperature": 0,
+            "max_completion_tokens": 4096,
+            "stream": False,
+        }
+
     @staticmethod
     def _raise_api_error(response: httpx.Response) -> None:
         messages = {
@@ -387,6 +448,13 @@ class OpenRouterDocumentParser:
         )
         matches = {document_type for marker, document_type in markers if marker in normalized}
         return matches.pop() if len(matches) == 1 else None
+
+    def _raw_extraction(self, response: httpx.Response) -> dict[str, Any]:
+        try:
+            message = response.json()["choices"][0]["message"]
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            raise DocumentInferenceError("OpenRouter response did not contain a model message") from exc
+        return self._decode_json_content(self._message_content(message))
 
     def _parse_response(
         self,
