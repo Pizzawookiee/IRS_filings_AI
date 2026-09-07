@@ -203,6 +203,7 @@ $env:OPENROUTER_API_KEY = "your-rotated-key"
 # Optional defaults shown below
 $env:OPENROUTER_MODEL = "anthropic/claude-sonnet-5"
 $env:OPENROUTER_TIMEOUT_SECONDS = "60"
+$env:OPENROUTER_MAX_COMPLETION_TOKENS = "16384"
 $env:OPENROUTER_PDF_ENGINE = "mistral-ocr" # cloudflare-ai and native are also supported
 ```
 

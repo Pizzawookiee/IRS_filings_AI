@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = "anthropic/claude-sonnet-5"
 DEFAULT_TIMEOUT_SECONDS = 60.0
+DEFAULT_MAX_COMPLETION_TOKENS = 16384
 DEFAULT_PDF_ENGINE = "mistral-ocr"
 SUPPORTED_PDF_ENGINES = {"mistral-ocr", "cloudflare-ai", "native"}
 MAX_FILE_BYTES = 20 * 1024 * 1024
@@ -179,6 +180,7 @@ class OpenRouterDocumentParser:
         if self.timeout_seconds <= 0:
             raise DocumentInferenceError("timeout_seconds must be greater than zero")
         self.client = client
+        self.max_completion_tokens = self._max_completion_tokens_from_env()
 
     @staticmethod
     def _timeout_from_env() -> float:
@@ -191,6 +193,21 @@ class OpenRouterDocumentParser:
             raise DocumentInferenceError("OPENROUTER_TIMEOUT_SECONDS must be a number") from exc
         if value <= 0:
             raise DocumentInferenceError("OPENROUTER_TIMEOUT_SECONDS must be greater than zero")
+        return value
+
+    @staticmethod
+    def _max_completion_tokens_from_env() -> int:
+        raw = os.getenv("OPENROUTER_MAX_COMPLETION_TOKENS")
+        if not raw:
+            return DEFAULT_MAX_COMPLETION_TOKENS
+        try:
+            value = int(raw)
+        except ValueError as exc:
+            raise DocumentInferenceError("OPENROUTER_MAX_COMPLETION_TOKENS must be an integer") from exc
+        if not 4096 <= value <= 65536:
+            raise DocumentInferenceError(
+                "OPENROUTER_MAX_COMPLETION_TOKENS must be between 4096 and 65536"
+            )
         return value
 
     def parse(self, path: str | Path) -> ProposedFacts:
@@ -233,6 +250,9 @@ class OpenRouterDocumentParser:
         client = self.client or httpx.Client(timeout=self.timeout_seconds)
         try:
             response = self._post_with_routing_fallback(client, headers, payload)
+            if self._is_length_limited(response):
+                retry_payload = self._build_length_retry_payload(payload)
+                response = self._post_with_routing_fallback(client, headers, retry_payload)
             if response.status_code >= 400:
                 self._raise_api_error(response)
             try:
@@ -273,6 +293,28 @@ class OpenRouterDocumentParser:
             fallback_payload = {**payload, "provider": {"require_parameters": False}}
             response = client.post(OPENROUTER_URL, headers=headers, json=fallback_payload)
         return response
+
+    @staticmethod
+    def _is_length_limited(response: httpx.Response) -> bool:
+        if response.status_code >= 400:
+            return False
+        try:
+            return response.json()["choices"][0].get("finish_reason") == "length"
+        except (ValueError, KeyError, IndexError, TypeError):
+            return False
+
+    def _build_length_retry_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        retry_payload = json.loads(json.dumps(payload))
+        retry_payload["max_completion_tokens"] = min(
+            max(self.max_completion_tokens * 2, 24576),
+            65536,
+        )
+        retry_payload["reasoning"] = {"max_tokens": 1024, "exclude": True}
+        retry_payload["messages"][1]["content"][0]["text"] += (
+            " Keep the response concise: return each supported canonical path once, use short "
+            "references, and emit only the JSON object."
+        )
+        return retry_payload
 
     @staticmethod
     def _is_parameter_routing_failure(response: httpx.Response) -> bool:
@@ -334,7 +376,8 @@ class OpenRouterDocumentParser:
                 },
             },
             "temperature": 0,
-            "max_completion_tokens": 4096,
+            "max_completion_tokens": self.max_completion_tokens,
+            "reasoning": {"max_tokens": 1024, "exclude": True},
             "stream": False,
             "provider": {"require_parameters": True},
         }
@@ -378,7 +421,8 @@ class OpenRouterDocumentParser:
             "plugins": [{"id": "response-healing"}],
             "provider": {"require_parameters": True},
             "temperature": 0,
-            "max_completion_tokens": 4096,
+            "max_completion_tokens": self.max_completion_tokens,
+            "reasoning": {"max_tokens": 1024, "exclude": True},
             "stream": False,
         }
 

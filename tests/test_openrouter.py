@@ -62,6 +62,8 @@ def test_request_construction_for_supported_media(media_type, expected_type):
     assert seen["model"] == "anthropic/claude-sonnet-5"
     assert seen["response_format"]["type"] == "json_schema"
     assert seen["provider"] == {"require_parameters": True}
+    assert seen["max_completion_tokens"] == 16384
+    assert seen["reasoning"] == {"max_tokens": 1024, "exclude": True}
     plugin_ids = [plugin["id"] for plugin in seen["plugins"]]
     assert "response-healing" in plugin_ids
     assert ("file-parser" in plugin_ids) is (media_type == "application/pdf")
@@ -88,6 +90,25 @@ def test_retries_parameter_routing_failure_without_strict_filter():
     assert requests[0]["provider"]["require_parameters"] is True
     assert requests[1]["provider"]["require_parameters"] is False
     assert requests[1]["response_format"] == requests[0]["response_format"]
+
+
+def test_retries_length_limited_extraction_with_larger_concise_budget():
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        if len(requests) == 1:
+            return httpx.Response(200, json={
+                "choices": [{"finish_reason": "length", "message": {"content": ""}}]
+            })
+        return httpx.Response(200, json=_body("433a", [{
+            "path": "assets.cash_and_bank", "value": 100, "ref": "Cash accounts"
+        }]))
+
+    result = _parser(handler).parse_bytes(b"pdf", "form-433a.pdf", "application/pdf")
+    assert result.document_type == "433a"
+    assert requests[1]["max_completion_tokens"] == 32768
+    assert "Keep the response concise" in requests[1]["messages"][1]["content"][0]["text"]
 
 
 def test_success_is_typed_unattested_and_has_document_provenance():
