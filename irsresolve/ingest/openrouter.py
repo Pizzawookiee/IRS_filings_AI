@@ -262,7 +262,11 @@ class OpenRouterDocumentParser:
                     expected_document_type=expected_type,
                 )
             except DocumentInferenceError as exc:
-                if not str(exc).startswith("Invalid value for "):
+                repairable = (
+                    str(exc).startswith("Invalid value for ")
+                    or str(exc).startswith("OpenRouter extraction schema mismatch at values.")
+                )
+                if not repairable:
                     raise
                 raw = self._raw_extraction(response)
                 repair_payload = self._build_repair_payload(raw, expected_type)
@@ -400,7 +404,9 @@ class OpenRouterDocumentParser:
                     "content": (
                         "Correct this extraction so it exactly matches the JSON schema. Every monetary "
                         "or decimal fact value must be a JSON number, never text, a calculation, an array, "
-                        "or an object. Preserve only facts supported by the original extraction. "
+                        "or an object. Every item in values must contain path, value, and ref. Remove any "
+                        "incomplete item rather than guessing its missing fields. Preserve only facts "
+                        "supported by the original extraction. "
                         + (
                             f'Set document_type to "{expected_document_type}". '
                             if expected_document_type else ""

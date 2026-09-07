@@ -298,6 +298,32 @@ def test_explicit_upload_category_recovers_missing_classification():
     assert 'document_type exactly as "433a"' in seen["messages"][1]["content"][0]["text"]
 
 
+def test_repairs_incomplete_value_item_once():
+    requests = []
+    malformed = {
+        "choices": [{"message": {"content": json.dumps({
+            "document_type": "433a",
+            "values": [
+                {"path": "assets.cash_and_bank", "value": 100, "ref": "Cash accounts"},
+                {"value": 200, "ref": "Unmapped line"},
+            ],
+        })}}]
+    }
+    repaired = _body("433a", [{
+        "path": "assets.cash_and_bank", "value": 100, "ref": "Cash accounts"
+    }])
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json=malformed if len(requests) == 1 else repaired)
+
+    result = _parser(handler).parse_bytes(b"pdf", "form-433a.pdf", "application/pdf")
+    assert result.document_type == "433a"
+    assert list(result.values) == ["assets.cash_and_bank"]
+    assert len(requests) == 2
+    assert "Remove any incomplete item" in requests[1]["messages"][1]["content"]
+
+
 def test_schema_error_names_location_without_echoing_value():
     body = _body(values=[{"path": "identity.age", "value": "sensitive-invalid", "ref": "page 1"}])
     parser = _parser(lambda request: httpx.Response(200, json=body))
