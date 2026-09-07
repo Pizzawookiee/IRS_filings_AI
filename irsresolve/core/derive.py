@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from pydantic import BaseModel, ConfigDict
 
 from .config import Config
+from .errors import FactsError
 
 ZERO = Decimal(0)
 
@@ -61,6 +62,11 @@ def _months_between(start: date, end: date) -> int:
 def _csed_date(p, years: int) -> date:
     """Assessment (best) or return-filed (§9 fallback) + 10 years."""
     base = p.assessment_date or p.return_filed_date or p.return_due_date
+    if base is None:
+        raise FactsError(
+            f"Tax period {p.year} needs an assessment, return-filed, or return-due "
+            "date before the collection statute can be screened."
+        )
     return date(base.year + years, base.month, base.day)
 
 

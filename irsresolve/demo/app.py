@@ -20,7 +20,7 @@ import streamlit as st
 from irsresolve.core.config import load_config
 from irsresolve.core.engine import Engine
 from irsresolve.core.expr import Validator
-from irsresolve.core.facts import Facts
+from irsresolve.core.facts import Facts, Provenance
 from irsresolve.core.intake import (
     REQUIRED_FINANCIAL_PATHS,
     QuestionnaireDraft,
@@ -200,9 +200,45 @@ def page_questions():
                 penalty = c4.number_input("Penalties", 0.0, value=float(old.penalty), step=100.0, key=f"period_penalty_{i}")
                 interest = c5.number_input("Interest", 0.0, value=float(old.interest), step=100.0, key=f"period_interest_{i}")
                 filed_jointly = st.checkbox("Filed jointly", old.filed_jointly, key=f"period_joint_{i}")
+                existing_date_type = next(
+                    (
+                        field
+                        for field in ("assessment_date", "return_filed_date", "return_due_date")
+                        if getattr(old, field) is not None
+                    ),
+                    "unknown",
+                )
+                date_types = ["unknown", "assessment_date", "return_filed_date", "return_due_date"]
+                c6, c7 = st.columns(2)
+                date_type = c6.selectbox(
+                    "Date available for CSED estimate",
+                    date_types,
+                    index=date_types.index(existing_date_type),
+                    format_func=lambda value: {
+                        "unknown": "Select a date type",
+                        "assessment_date": "IRS assessment date (best)",
+                        "return_filed_date": "Return filed date",
+                        "return_due_date": "Return due date",
+                    }[value],
+                    key=f"period_date_type_{i}",
+                    help="The engine needs one of these dates to estimate the IRS collection deadline.",
+                )
+                reference_date = c7.date_input(
+                    "Date",
+                    value=getattr(old, date_type) if date_type != "unknown" else None,
+                    key=f"period_reference_date_{i}",
+                    disabled=date_type == "unknown",
+                )
+                period_dates = {
+                    "assessment_date": None,
+                    "return_filed_date": None,
+                    "return_due_date": None,
+                }
+                if date_type != "unknown" and reference_date is not None:
+                    period_dates[date_type] = reference_date
                 periods.append(TaxPeriodDraft(
                     year=year, tax_type=tax_type, tax=tax, penalty=penalty,
-                    interest=interest, filed_jointly=filed_jointly,
+                    interest=interest, filed_jointly=filed_jointly, **period_dates,
                 ))
             returns_filed_all = st.checkbox("All required tax returns are filed", draft.returns_filed_all)
             unfiled_years_text = ""
@@ -237,6 +273,14 @@ def page_questions():
                 return
             if not any(period.tax + period.penalty + period.interest > 0 for period in periods):
                 st.error("Enter an amount for at least one tax period.")
+            elif any(
+                not (period.assessment_date or period.return_filed_date or period.return_due_date)
+                for period in periods
+            ):
+                st.error(
+                    "Add an assessment, filing, or due date for every tax period. "
+                    "The engine needs one to estimate the IRS collection deadline."
+                )
             elif not returns_filed_all and not unfiled_years:
                 st.error("List at least one unfiled tax year.")
             else:
@@ -695,6 +739,77 @@ def _render_synthesis(synthesis: SynthesisResult) -> None:
         st.warning(item)
 
 
+def _collect_missing_tax_period_dates(model: Facts) -> bool:
+    """Collect dates omitted by older questionnaire sessions before running the engine."""
+    periods = model.debt.tax_periods.value
+    missing = [
+        index
+        for index, period in enumerate(periods)
+        if not (period.assessment_date or period.return_filed_date or period.return_due_date)
+    ]
+    if not missing:
+        return False
+
+    st.warning(
+        "A date is needed for each tax period before analysis. This lets the rule-based "
+        "engine estimate the IRS collection deadline (CSED)."
+    )
+    answers: dict[int, tuple[str, date | None]] = {}
+    date_types = ["assessment_date", "return_filed_date", "return_due_date"]
+    with st.form("missing_tax_period_dates"):
+        for index in missing:
+            period = periods[index]
+            st.markdown(f"**{period.year} — {period.tax_type.replace('_', ' ').upper()}**")
+            c1, c2 = st.columns(2)
+            date_type = c1.selectbox(
+                "Date type",
+                date_types,
+                format_func=lambda value: {
+                    "assessment_date": "IRS assessment date (best)",
+                    "return_filed_date": "Return filed date",
+                    "return_due_date": "Return due date",
+                }[value],
+                key=f"analysis_period_date_type_{index}",
+            )
+            reference_date = c2.date_input(
+                "Date",
+                value=None,
+                key=f"analysis_period_reference_date_{index}",
+            )
+            answers[index] = (date_type, reference_date)
+        submitted = st.form_submit_button("Save dates and analyze", type="primary")
+
+    if submitted:
+        if any(reference_date is None for _, reference_date in answers.values()):
+            st.error("Enter a date for every tax period shown above.")
+            return True
+        updated_periods = list(periods)
+        for index, (date_type, reference_date) in answers.items():
+            updated_periods[index] = periods[index].model_copy(update={date_type: reference_date})
+        updated_tax_periods = model.debt.tax_periods.model_copy(update={
+            "value": updated_periods,
+            "provenance": Provenance(
+                source="user",
+                ref="collection-statute date confirmed during analysis",
+                attested=True,
+            ),
+        })
+        updated_model = model.model_copy(update={
+            "debt": model.debt.model_copy(update={"tax_periods": updated_tax_periods})
+        })
+        st.session_state.facts = updated_model.model_dump(mode="json")
+
+        draft = _draft()
+        if len(draft.tax_periods) == len(updated_periods):
+            draft_data = draft.model_dump(mode="json")
+            draft_data["tax_periods"] = [period.model_dump(mode="json") for period in updated_periods]
+            st.session_state.draft = QuestionnaireDraft.model_validate(draft_data).model_dump(mode="json")
+        st.session_state.synthesis = None
+        st.session_state.synthesis_signature = None
+        st.rerun()
+    return True
+
+
 def page_analysis():
     st.header("Analysis")
     facts = st.session_state.facts
@@ -705,6 +820,8 @@ def page_analysis():
         model = Facts.model_validate(facts)
     except Exception as e:  # noqa: BLE001
         st.error(f"More information needed before analysis: {e}")
+        return
+    if _collect_missing_tax_period_dates(model):
         return
     _cfg, engine = get_engine()
     try:

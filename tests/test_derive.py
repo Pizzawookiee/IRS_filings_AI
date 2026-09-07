@@ -5,8 +5,11 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
+
 from irsresolve.core.config import load_config
 from irsresolve.core.derive import derive_all
+from irsresolve.core.errors import FactsError
 from irsresolve.core.facts import Facts, unwrap
 
 CFG = load_config("irsresolve/config")
@@ -30,6 +33,17 @@ def test_case_a_debt_and_csed_layer1_only():
     assert d.csed_confidence == "high"
     # Layer 2 absent → all None
     assert d.disposable_income is None and d.nre_total is None and d.rcp_min is None
+
+
+def test_missing_csed_reference_date_is_a_clear_facts_error():
+    data = json.loads(Path("fixtures/case_a_simple_plan.json").read_text())
+    period = data["facts"]["debt"]["tax_periods"][0]
+    period["assessment_date"] = None
+    period["return_filed_date"] = None
+    period["return_due_date"] = None
+
+    with pytest.raises(FactsError, match="Tax period 2022 needs an assessment"):
+        derive_all(unwrap(Facts.model_validate(data["facts"])), CFG, AS_OF)
 
 
 def test_case_b_disposable_and_zero_nre():
