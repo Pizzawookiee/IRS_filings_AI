@@ -323,6 +323,7 @@ class OpenRouterDocumentParser:
                     repaired_response,
                     filename=filename,
                     expected_document_type=expected_type,
+                    allow_partial=True,
                 )
         except httpx.TimeoutException as exc:
             raise DocumentInferenceError("OpenRouter timed out while extracting the document") from exc
@@ -599,6 +600,7 @@ class OpenRouterDocumentParser:
         *,
         filename: str = "",
         expected_document_type: DocumentType | None = None,
+        allow_partial: bool = False,
     ) -> ProposedFacts:
         try:
             body = response.json()
@@ -641,6 +643,7 @@ class OpenRouterDocumentParser:
 
         source = SOURCE_BY_DOCUMENT_TYPE[extraction.document_type]
         proposals: dict[str, dict[str, Any]] = {}
+        rejected: list[DocumentInferenceError] = []
         for item in extraction.values:
             if item.path not in CANONICAL_LEAVES:
                 raise DocumentInferenceError(f"Model returned unknown fact path: {item.path}")
@@ -648,22 +651,37 @@ class OpenRouterDocumentParser:
                 raise DocumentInferenceError("A 1099 extraction cannot propose expense values")
             if item.path in proposals:
                 raise DocumentInferenceError(f"Model returned duplicate fact path: {item.path}")
-            normalized_value = self._normalize_scalar(item.path, item.value)
-            self._validate_normalized_value(item.path, normalized_value)
-            wrapped = {
-                "value": normalized_value,
-                "provenance": {"source": source, "ref": item.ref, "attested": False},
-            }
             try:
+                normalized_value = self._normalize_scalar(item.path, item.value)
+                self._validate_normalized_value(item.path, normalized_value)
+                wrapped = {
+                    "value": normalized_value,
+                    "provenance": {"source": source, "ref": item.ref, "attested": False},
+                }
                 validated = TypeAdapter(CANONICAL_LEAVES[item.path]).validate_python(wrapped)
+            except DocumentInferenceError as exc:
+                if not allow_partial:
+                    raise
+                rejected.append(exc)
+                logger.warning("Omitting invalid repaired proposal; path=%s", item.path)
+                continue
             except ValidationError as exc:
-                raise DocumentInferenceError(f"Invalid value for {item.path}: {exc.errors()[0]['msg']}") from exc
+                error = DocumentInferenceError(
+                    f"Invalid value for {item.path}: {exc.errors()[0]['msg']}"
+                )
+                if not allow_partial:
+                    raise error from exc
+                rejected.append(error)
+                logger.warning("Omitting invalid repaired proposal; path=%s", item.path)
+                continue
             proposals[item.path] = {
                 "value": validated.value,
                 "source": source,
                 "ref": item.ref,
                 "attested": False,
             }
+        if not proposals and rejected:
+            raise rejected[0]
         return ProposedFacts(document_type=extraction.document_type, values=proposals)
 
     @staticmethod
@@ -726,6 +744,8 @@ class OpenRouterDocumentParser:
     @staticmethod
     def _normalize_decimal(path: str, value: Any) -> Any:
         """Normalize only unambiguous money and decimal representations."""
+        if isinstance(value, list) and len(value) == 1:
+            value = value[0]
         if value is None:
             return value
         monthly_path = path == "income.monthly_gross_income" or path.startswith("expenses.") or path.startswith("income.income_sources")
@@ -733,7 +753,12 @@ class OpenRouterDocumentParser:
         if isinstance(value, dict):
             monthly_keys = [key for key in ("monthly", "monthly_amount") if key in value]
             annual_keys = [key for key in ("annual", "annual_amount") if key in value]
-            amount_keys = [key for key in ("amount", "value") if key in value]
+            amount_keys = [
+                key for key in (
+                    "amount", "value", "total", "total_amount", "result", "calculated_value",
+                    "monthly_total",
+                ) if key in value
+            ]
             currency = str(value.get("currency") or "USD").upper()
             if currency not in {"USD", "$"}:
                 return value
@@ -804,6 +829,27 @@ class OpenRouterDocumentParser:
         try:
             number = Decimal(candidate)
         except InvalidOperation:
+            lowered_full = candidate.lower()
+            if any(word in lowered_full for word in ("about", "approx", "estimated", "roughly")):
+                return value
+            recognized_label = any(
+                word in lowered_full
+                for word in ("total", "monthly", "income", "wages", "line", "box", "amount")
+            )
+            currency_amounts = re.findall(r"\$\s*([\d,]+(?:\.\d+)?)", candidate)
+            if recognized_label and len(currency_amounts) == 1:
+                number = Decimal(currency_amounts[0].replace(",", ""))
+                if monthly_path and any(word in lowered_full for word in ("annual", "annually", "per year")):
+                    number /= Decimal(12)
+                return number
+            labeled_amount = re.fullmatch(
+                r"\s*(?:line\s+\d+\s*[:\-]?\s*)?(?:total\s+)?(?:gross\s+)?"
+                r"(?:monthly\s+)?(?:income|wages|amount)\s*[:=]\s*\$?([\d,]+(?:\.\d+)?)\s*",
+                candidate,
+                flags=re.IGNORECASE,
+            )
+            if labeled_amount:
+                return Decimal(labeled_amount.group(1).replace(",", ""))
             return value
         number = -number if negative else number
         if period in {"month", "monthly", "per_month", "mo"} and not monthly_path:

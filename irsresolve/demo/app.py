@@ -21,7 +21,13 @@ from irsresolve.core.config import load_config
 from irsresolve.core.engine import Engine
 from irsresolve.core.expr import Validator
 from irsresolve.core.facts import Facts
-from irsresolve.core.intake import QuestionnaireDraft, TaxPeriodDraft, build_facts, questionnaire_base
+from irsresolve.core.intake import (
+    REQUIRED_FINANCIAL_PATHS,
+    QuestionnaireDraft,
+    TaxPeriodDraft,
+    build_facts,
+    questionnaire_base,
+)
 from irsresolve.core.rules import load_rules
 from irsresolve.analysis.openrouter import OpenRouterAnalysisSynthesizer, SynthesisResult
 from irsresolve.ingest.fixtures import F433AFixture, F1099Fixture, NoticeFixture, W2Fixture
@@ -386,6 +392,12 @@ def _render_document_review(draft: QuestionnaireDraft) -> None:
     st.caption("Nothing extracted by the model is used until you confirm it here.")
     proposals = st.session_state.proposed
     questionnaire = questionnaire_base(draft)
+    missing_required = sorted(REQUIRED_FINANCIAL_PATHS - proposals.keys())
+    if missing_required:
+        st.warning(
+            "These required values could not be extracted reliably. Enter and confirm them below: "
+            + ", ".join(missing_required)
+        )
     with st.form("document_review"):
         edited: list[tuple[str, dict, bool, str]] = []
         for index, (path, proposal) in enumerate(sorted(proposals.items())):

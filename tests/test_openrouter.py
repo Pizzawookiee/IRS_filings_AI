@@ -140,6 +140,10 @@ def test_success_is_typed_unattested_and_has_document_provenance():
         ("90,000.00 / 12 months = 7,500.00", "7500.00"),
         ("7,500.00 (90,000.00 / 12)", "7500.00"),
         ("$5,000 (monthly)", "5000"),
+        ("Total Income (Line 35): $7,515", "7515"),
+        ("Box 1 annual wages: $90,000", "7500"),
+        ({"total": "$7,515", "period": "monthly"}, "7515"),
+        (["$7,515"], "7515"),
     ],
 )
 def test_unambiguous_currency_formatting_is_normalized(formatted, expected):
@@ -299,6 +303,41 @@ def test_invalid_decimal_shape_gets_one_schema_repair_pass():
     assert len(requests) == 2
     assert "must be a JSON number" in requests[1]["messages"][1]["content"]
     assert all(plugin["id"] != "file-parser" for plugin in requests[1]["plugins"])
+
+
+def test_invalid_repaired_field_is_omitted_when_other_proposals_are_valid():
+    body = _body("433a", [
+        {
+            "path": "income.monthly_gross_income",
+            "value": "not readable",
+            "ref": "Line thirty five",
+        },
+        {
+            "path": "expenses.housing_utilities",
+            "value": 1900,
+            "ref": "Line thirty seven",
+        },
+    ])
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json=body)
+
+    result = _parser(handler).parse_bytes(b"pdf", "form-433a.pdf", "application/pdf")
+    assert "income.monthly_gross_income" not in result.values
+    assert str(result.values["expenses.housing_utilities"]["value"]) == "1900"
+    assert len(requests) == 2
+
+
+def test_document_still_fails_when_every_repaired_proposal_is_invalid():
+    body = _body("433a", [{
+        "path": "income.monthly_gross_income", "value": "not readable", "ref": "Income"
+    }])
+    with pytest.raises(DocumentInferenceError, match="Invalid value"):
+        _parser(lambda request: httpx.Response(200, json=body)).parse_bytes(
+            b"pdf", "form-433a.pdf", "application/pdf"
+        )
 
 
 def test_proposal_cannot_reach_engine_without_confirmation():
